@@ -1,0 +1,176 @@
+[project]
+name = "curbridge-hr-agent-backend"
+version = "1.0.0"
+description = "Curbridge HR Agent Backend - Canadian Employment Standards Q&A Agent with RAG"
+requires-python = ">=3.11"
+dependencies = [
+    # Core Framework
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.0",
+    # AI & Agent Framework
+    "langgraph>=0.0.40",
+    "langchain>=0.1.0",
+    "langchain-openai>=0.0.5",
+    "openai>=1.10.0",
+    "cohere>=5.0.0", # Reranking for improved search relevance
+    "langfuse>=2.20.0",
+    # Database & Vector Store
+    "supabase>=2.3.0",
+    "pgvector>=0.2.4",
+    # Background Jobs & Workflows
+    "inngest>=0.3.0",
+    # Document Processing
+    "docling>=1.0.0",
+    "python-magic>=0.4.27", # File type detection
+    # Chat Platform Integrations
+    "telethon>=1.34.0", # Telegram
+    "slack-sdk>=3.26.0", # Slack
+    "httpx>=0.26.0", # WhatsApp Business API & general async HTTP
+    # Utilities
+    "aiofiles>=23.2.1",
+    "python-multipart>=0.0.6", # File uploads
+    "python-jose[cryptography]>=3.3.0", # JWT handling
+    "passlib[bcrypt]>=1.7.4", # Password hashing
+    "tiktoken>=0.5.2", # Token counting
+    # Validation & Security
+    "email-validator>=2.1.0",
+    "python-magic>=0.4.27",
+    "pypdf2>=3.0.1",
+    "python-docx>=1.2.0",
+    "pandas>=2.3.3",
+    "openpyxl>=3.1.5",
+    "python-pptx>=1.0.2",
+    # PII Detection & Anonymization
+    "presidio-analyzer>=2.2.0", # PII detection
+    "presidio-anonymizer>=2.2.0", # PII anonymization
+    "spacy>=3.7.0",
+    "en-core-web-sm",
+    "langchain-anthropic>=1.0.1",
+    "langchain-google-genai>=3.0.0",
+    "langchain-community>=0.4.1",
+    "tavily-python>=0.7.12",
+    "langchain-mcp-adapters>=0.1.12",
+    "mcp>=1.20.0",
+    "python-telegram-bot>=22.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    # Testing
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "httpx>=0.26.0",  # For TestClient
+
+    # Code Quality
+    "black>=24.1.0",
+    "ruff>=0.1.14",
+    "mypy>=1.8.0",
+    "pre-commit>=3.6.0",
+
+    # Type Stubs
+    "types-aiofiles>=23.2.0",
+    "types-passlib>=1.7.7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[dependency-groups]
+dev = [
+    # Testing
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "httpx>=0.26.0",  # For TestClient
+
+    # Code Quality
+    "black>=24.1.0",
+    "ruff>=0.1.14",
+    "mypy>=1.8.0",
+    "pre-commit>=3.6.0",
+
+    # Type Stubs
+    "types-aiofiles>=23.2.0",
+    "types-passlib>=1.7.7",
+]
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C",   # flake8-comprehensions
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_any_generics = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=app",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "e2e: End-to-end tests",
+    "slow: Slow tests",
+]
+
+[tool.uv.sources]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
