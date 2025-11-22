@@ -1,0 +1,7 @@
+# This file is for Railway auto-detection
+# Actual dependencies are managed by uv via pyproject.toml
+# Railway will use nixpacks.toml for the build, but this helps with detection
+
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
