@@ -3,8 +3,8 @@ nixPkgs = ["python311", "gcc"]
 
 [phases.install]
 cmds = [
-  "pip install --upgrade pip",
-  "pip install uv==0.4.30",
+  "python -m pip install --upgrade pip",
+  "python -m pip install uv==0.4.30",
   "uv sync --no-dev --frozen"
 ]
 
