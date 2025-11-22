@@ -1,16 +1,16 @@
 [phases.setup]
-nixPkgs = ["python311", "gcc"]
+nixPkgs = ["python311", "python311Packages.pip", "gcc"]
 
 [phases.install]
 cmds = [
-  "python -m ensurepip --upgrade",
-  "python -m pip install --upgrade pip",
-  "python -m pip install uv==0.4.30",
-  "uv sync --no-dev --frozen"
+  "python -m venv /opt/venv",
+  ". /opt/venv/bin/activate && pip install --upgrade pip",
+  ". /opt/venv/bin/activate && pip install uv==0.4.30",
+  ". /opt/venv/bin/activate && uv sync --no-dev --frozen"
 ]
 
 [phases.build]
 cmds = []
 
 [start]
-cmd = "uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+cmd = ". /opt/venv/bin/activate && uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT"
