@@ -154,7 +154,7 @@ Respond in valid JSON format with this structure:
   "requires_recent_context": true/false,
   "requires_multiple_sources": true/false,
   "suggested_doc_count": 1-20,
-  "suggested_similarity_threshold": 0.6-0.9,
+  "suggested_similarity_threshold": 0.4-0.6,  // Lower range for better recall
   "requires_tools": true/false,
   "suggested_tools": ["tool1", "tool2"],
   "key_concepts": ["concept1", "concept2"],
@@ -277,7 +277,7 @@ Domain Knowledge for Context:
             ),
             suggested_doc_count=analysis_json.get("suggested_doc_count", 5),
             suggested_similarity_threshold=analysis_json.get(
-                "suggested_similarity_threshold", 0.7
+                "suggested_similarity_threshold", 0.45  # Lower default for better recall
             ),
             requires_tools=analysis_json.get("requires_tools", False),
             suggested_tools=analysis_json.get("suggested_tools", []),
@@ -382,8 +382,10 @@ async def retrieve_context_node(state: AgentState) -> dict[str, Any]:
             suggested_threshold = query_analysis.suggested_similarity_threshold
 
             # Use the LOWER threshold to be more inclusive
-            # This prevents the query analysis from being too strict
-            final_threshold = min(suggested_threshold, search_settings.similarity_threshold)
+            # Cap suggested threshold at 0.5 to prevent overly strict filtering
+            # This ensures keyword matches can still be found even with lower vector similarity
+            capped_suggested = min(suggested_threshold, 0.5)
+            final_threshold = min(capped_suggested, search_settings.similarity_threshold)
 
             logger.debug(
                 f"Applying query analysis suggestions: "

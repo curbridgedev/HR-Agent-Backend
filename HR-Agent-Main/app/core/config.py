@@ -68,8 +68,8 @@ class Settings(BaseSettings):
     database_url: str = ""
 
     # Vector Search Configuration
-    vector_similarity_threshold: float = 0.60  # Lowered from 0.75 to capture more relevant results
-    vector_max_results: int = 5
+    vector_similarity_threshold: float = 0.45  # Lowered to capture more relevant results (was 0.60)
+    vector_max_results: int = 15  # Increased to get more candidates before filtering/reranking (was 5)
     hybrid_search_enabled: bool = True
 
     # AI & Language Models

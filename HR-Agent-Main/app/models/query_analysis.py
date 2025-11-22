@@ -109,7 +109,7 @@ class QueryAnalysisResult(BaseResponse):
     requires_recent_context: bool = Field(False, description="Needs recent/updated information")
     requires_multiple_sources: bool = Field(False, description="Needs multiple document sources")
     suggested_doc_count: int = Field(5, ge=1, le=20, description="Suggested number of docs to retrieve")
-    suggested_similarity_threshold: float = Field(0.7, ge=0.0, le=1.0, description="Suggested similarity threshold")
+    suggested_similarity_threshold: float = Field(0.45, ge=0.0, le=1.0, description="Suggested similarity threshold (lowered for better recall)")
 
     # Tool requirements
     requires_tools: bool = Field(False, description="Requires external tool invocation")

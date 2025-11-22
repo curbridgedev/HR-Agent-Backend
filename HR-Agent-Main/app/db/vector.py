@@ -139,6 +139,49 @@ async def hybrid_search(
         logger.debug(f"Search params: threshold={threshold}, count={count}, embedding_len={len(query_embedding)}")
         logger.debug(f"Embedding type: {type(query_embedding)}, first 3 values: {query_embedding[:3] if len(query_embedding) > 0 else 'empty'}")
 
+        # Count total available chunks before filtering
+        try:
+            count_query = db.table("knowledge_base").select("id", count="exact")
+            if province:
+                # Join with documents to filter by province
+                count_query = (
+                    db.table("knowledge_base")
+                    .select("id", count="exact")
+                    .eq("embedding", None, invert=True)  # Has embedding
+                )
+                # Get count via a separate query that joins with documents
+                doc_ids_response = (
+                    db.table("documents")
+                    .select("id")
+                    .in_("province", [province, "ALL"])
+                    .execute()
+                )
+                if doc_ids_response.data:
+                    doc_ids = [doc["id"] for doc in doc_ids_response.data]
+                    count_response = (
+                        db.table("knowledge_base")
+                        .select("id", count="exact")
+                        .in_("document_id", doc_ids)
+                        .not_.is_("embedding", "null")
+                        .execute()
+                    )
+                    total_chunks = count_response.count if hasattr(count_response, 'count') else len(count_response.data) if count_response.data else 0
+                else:
+                    total_chunks = 0
+            else:
+                count_response = (
+                    db.table("knowledge_base")
+                    .select("id", count="exact")
+                    .not_.is_("embedding", "null")
+                    .execute()
+                )
+                total_chunks = count_response.count if hasattr(count_response, 'count') else len(count_response.data) if count_response.data else 0
+            
+            logger.info(f"📊 Total available chunks in knowledge_base: {total_chunks} (province filter: {province or 'NONE'})")
+        except Exception as count_error:
+            logger.warning(f"Could not count available chunks: {count_error}")
+            total_chunks = "unknown"
+
         # Use Supabase RPC function for hybrid search
         # Pass original query text for ILIKE matching
         rpc_params = {
@@ -182,13 +225,31 @@ async def hybrid_search(
         if not response.data or len(response.data) == 0:
             logger.warning(f"❌ Hybrid search returned 0 results!")
             logger.warning(f"   Query: '{query_text}'")
-            logger.warning(f"   Threshold: {threshold}")
+            logger.warning(f"   Threshold: {threshold} (effective: {threshold * 0.75:.3f} for vector)")
+            logger.warning(f"   Total available chunks: {total_chunks if 'total_chunks' in locals() else 'unknown'}")
+            logger.warning(f"   Province filter: {province or 'NONE'}")
             logger.warning(f"   Embedding length: {len(query_embedding)}")
-            logger.warning(f"   Response has data attr: {hasattr(response, 'data')}")
-            logger.warning(f"   Response data value: {response.data}")
             
-            # Try direct query to verify chunks exist
-            logger.warning(f"   💡 Try lowering VECTOR_SIMILARITY_THRESHOLD in .env or check if chunks exist")
+            # Check if keyword exists in any chunks (for debugging)
+            try:
+                keyword_check = (
+                    db.table("knowledge_base")
+                    .select("id, title, content", count="exact")
+                    .or_(f"content.ilike.%{query_text}%,title.ilike.%{query_text}%")
+                    .limit(5)
+                    .execute()
+                )
+                keyword_matches = keyword_check.count if hasattr(keyword_check, 'count') else len(keyword_check.data) if keyword_check.data else 0
+                logger.warning(f"   Keyword matches (no filters): {keyword_matches}")
+                if keyword_check.data:
+                    logger.warning(f"   Sample matches: {[doc.get('title', 'no title')[:50] for doc in keyword_check.data[:3]]}")
+            except Exception as kw_error:
+                logger.debug(f"   Could not check keyword matches: {kw_error}")
+            
+            logger.warning(f"   💡 Suggestions:")
+            logger.warning(f"      - Lower VECTOR_SIMILARITY_THRESHOLD (current: {threshold})")
+            logger.warning(f"      - Check if chunks exist for province: {province or 'ALL'}")
+            logger.warning(f"      - Verify keyword '{query_text}' exists in knowledge_base")
         
         return response.data if response.data else []
 
