@@ -40,8 +40,9 @@ def get_langfuse_client() -> Optional[Langfuse]:
                 secret_key=settings.langfuse_secret_key,
                 host=settings.langfuse_host,
                 flush_interval=settings.langfuse_flush_interval,
+                timeout=30.0,  # Increase timeout from default 5s to 30s
             )
-            logger.info(f"LangFuse client initialized: host={settings.langfuse_host}")
+            logger.info(f"LangFuse client initialized: host={settings.langfuse_host}, timeout=30s")
         except Exception as e:
             logger.error(f"Failed to initialize LangFuse client: {e}", exc_info=True)
             return None
@@ -103,14 +104,16 @@ def flush_langfuse():
     Flush pending LangFuse traces.
 
     Call this during application shutdown or after critical operations.
+    Non-blocking - errors are logged but don't raise exceptions.
     """
     client = get_langfuse_client()
     if client:
         try:
-            client.flush()
+            client.flush()  # LangFuse flush() doesn't accept timeout parameter
             logger.debug("LangFuse traces flushed")
         except Exception as e:
-            logger.error(f"Failed to flush LangFuse traces: {e}", exc_info=True)
+            # Log but don't raise - observability failures shouldn't break the app
+            logger.warning(f"LangFuse flush failed (non-critical): {e}")
 
 
 def shutdown_langfuse():
@@ -118,14 +121,16 @@ def shutdown_langfuse():
     Shutdown LangFuse client and flush remaining traces.
 
     Call this during application shutdown.
+    Non-blocking - errors are logged but don't prevent shutdown.
     """
     global _langfuse_client
 
     if _langfuse_client:
         try:
-            _langfuse_client.flush()
+            _langfuse_client.flush()  # LangFuse flush() doesn't accept timeout parameter
             logger.info("LangFuse client shutdown complete")
         except Exception as e:
-            logger.error(f"Error during LangFuse shutdown: {e}", exc_info=True)
+            # Log but don't raise - observability failures shouldn't break shutdown
+            logger.warning(f"LangFuse shutdown warning (non-critical): {e}")
         finally:
             _langfuse_client = None

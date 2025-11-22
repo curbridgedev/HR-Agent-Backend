@@ -41,6 +41,7 @@ class DocumentIngestionService:
         file_path: Path,
         title: str | None = None,
         source: str = "admin_upload",
+        province: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
@@ -50,6 +51,7 @@ class DocumentIngestionService:
             file_path: Path to the document file
             title: Document title (auto-generated from filename if not provided)
             source: Source of the document
+            province: Canadian province code (MB, ON, SK, AB, BC, or ALL for federal/multi-province)
             metadata: Additional metadata
 
         Returns:
@@ -63,7 +65,23 @@ class DocumentIngestionService:
             }
         """
         document_id = str(uuid4())
-        title = title or file_path.stem
+        
+        # Generate a nice title from filename
+        if title:
+            # Use provided title as-is
+            display_title = title
+        else:
+            # Clean up filename for display
+            filename = file_path.stem  # Get filename without extension
+            # Replace underscores and hyphens with spaces
+            display_title = filename.replace('_', ' ').replace('-', ' ')
+            # Remove common temporary prefixes
+            if display_title.lower().startswith('tmp'):
+                display_title = "Uploaded Document"
+            # Capitalize words
+            display_title = ' '.join(word.capitalize() for word in display_title.split())
+        
+        title = display_title
         metadata = metadata or {}
 
         try:
@@ -138,8 +156,14 @@ class DocumentIngestionService:
             total_tokens = sum(chunk.token_count for chunk in chunks)
 
             # First, create document metadata record
+            # Extract a summary/preview of content for the document record (first 500 chars)
+            content_preview = content[:500] if content else ""
+            
             doc_record = {
                 "id": document_id,
+                "title": title,  # Set title (required for display)
+                "content": content_preview,  # Preview/summary (full content is in chunks)
+                "source": source,  # Set source (admin_upload, api_upload, etc.)
                 "filename": file_path.name,
                 "original_filename": file_path.name,
                 "file_type": file_path.suffix.lstrip('.') or 'unknown',
@@ -150,6 +174,20 @@ class DocumentIngestionService:
                 "total_tokens": total_tokens,
                 "metadata": combined_metadata,
             }
+            
+            # Add province if provided
+            if province:
+                # Validate province code
+                valid_provinces = ["MB", "ON", "SK", "AB", "BC", "ALL"]
+                if province.upper() in valid_provinces:
+                    doc_record["province"] = province.upper()
+                    logger.info(f"[{document_id}] Document tagged with province: {province.upper()}")
+                else:
+                    logger.warning(f"[{document_id}] Invalid province code '{province}', ignoring. Valid: {', '.join(valid_provinces)}")
+            else:
+                # Default to 'ALL' if no province specified (for backward compatibility)
+                doc_record["province"] = "ALL"
+                logger.debug(f"[{document_id}] No province specified, defaulting to 'ALL'")
 
             try:
                 self.db.table("documents").insert(doc_record).execute()
@@ -192,7 +230,7 @@ class DocumentIngestionService:
                 source_type = source_type_map.get(source, "document")
 
                 chunk_doc = {
-                    "title": f"{title} (chunk {chunk.index + 1}/{len(chunks)})",
+                    "title": f"{display_title} (chunk {chunk.index + 1}/{len(chunks)})",
                     "content": chunk.content,
                     "embedding": embedding,
                     "source_type": source_type,

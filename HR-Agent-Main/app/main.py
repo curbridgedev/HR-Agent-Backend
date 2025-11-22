@@ -115,7 +115,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 # Create FastAPI application
 app = FastAPI(
-    title=settings.app_name,
+    title="HR Agent - Canadian Employment Standards Assistant",
     version=settings.app_version,
     description="Canadian Employment Standards HR Agent - AI-powered Q&A assistant for provincial employment law and HR policies with RAG capabilities",
     docs_url="/docs" if settings.enable_api_docs else None,
@@ -129,6 +129,21 @@ app = FastAPI(
     license_info={
         "name": "Proprietary",
     },
+    # OpenAPI metadata
+    openapi_tags=[
+        {
+            "name": "Chat",
+            "description": "Chat endpoints for interacting with the HR Agent",
+        },
+        {
+            "name": "Documents",
+            "description": "Document upload and management endpoints",
+        },
+        {
+            "name": "Health",
+            "description": "Health check and monitoring endpoints",
+        },
+    ],
 )
 
 # Add middleware

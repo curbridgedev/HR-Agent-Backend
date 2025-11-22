@@ -30,6 +30,7 @@ async def upload_document(
     file: UploadFile = File(..., description="Document file to upload"),
     title: Optional[str] = Form(None, description="Document title (optional)"),
     source: str = Form("admin_upload", description="Source of document"),
+    province: Optional[str] = Form(None, description="Canadian province (MB, ON, SK, AB, BC, or ALL for federal/multi-province)"),
     metadata: Optional[str] = Form(None, description="Additional metadata as JSON string"),
 ):
     """
@@ -94,8 +95,9 @@ async def upload_document(
 
             result = await ingestion_service.ingest_document(
                 file_path=temp_path,
-                title=title,
+                title=title or file.filename,  # Use original filename if no title provided
                 source=source,
+                province=province,  # Pass province for filtering
                 metadata=doc_metadata,
             )
 
@@ -136,6 +138,7 @@ async def upload_document(
 async def upload_documents_bulk(
     files: List[UploadFile] = File(..., description="Multiple document files"),
     source: str = Form("admin_upload", description="Source for all documents"),
+    province: Optional[str] = Form(None, description="Canadian province for all documents (MB, ON, SK, AB, BC, or ALL)"),
 ):
     """
     Upload multiple documents at once.
@@ -179,10 +182,14 @@ async def upload_documents_bulk(
                     await f.write(content)
 
             try:
+                logger.info(f"Starting ingestion for {file.filename} (size: {temp_path.stat().st_size if temp_path.exists() else 0} bytes)")
                 result = await ingestion_service.ingest_document(
                     file_path=temp_path,
+                    title=file.filename,  # Use original filename as title
                     source=source,
+                    province=province,  # Pass province for filtering
                 )
+                logger.info(f"Completed ingestion for {file.filename}: {result.get('status', 'unknown')}")
 
                 if result["status"] == "completed":
                     results["succeeded"] += 1

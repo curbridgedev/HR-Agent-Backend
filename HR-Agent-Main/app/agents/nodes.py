@@ -4,6 +4,7 @@ LangGraph agent nodes - individual processing steps.
 
 import asyncio
 import json
+import re
 import time
 from typing import Any
 
@@ -400,15 +401,33 @@ async def retrieve_context_node(state: AgentState) -> dict[str, Any]:
         # Generate embedding for query
         query_embedding = await generate_embedding(state["query"])
 
-        # Perform hybrid search
+        # Perform hybrid search with province filter
         db = get_supabase_client()
+        province = state.get("province")  # Get province from state
+        
+        if not province:
+            logger.warning(f"⚠️ No province in state for query: {state['query'][:50]}...")
+            logger.warning(f"   State keys: {list(state.keys())}")
+        
+        logger.info(f"🔍 Retrieving context with province filter: {province or 'NONE'}")
+        
         documents = await hybrid_search(
             db=db,
             query_embedding=query_embedding,
             query_text=state["query"],
             match_threshold=final_threshold,
             match_count=final_max_results,
+            province=province,  # Filter by province
         )
+        
+        if province:
+            logger.info(f"✅ Province filter '{province}' applied: {len(documents)} results")
+            # Check if any documents have wrong province
+            for doc in documents[:3]:  # Check first 3
+                doc_title = doc.get("document_title") or doc.get("title", "unknown")
+                logger.debug(f"   Document: {doc_title[:50]}...")
+        else:
+            logger.warning(f"⚠️ No province filter - returned {len(documents)} results from all provinces")
 
         # Format context text
         context_text = ""
@@ -483,18 +502,48 @@ async def generate_response_node(state: AgentState) -> dict[str, Any]:
 
         if system_prompt_obj:
             system_prompt = system_prompt_obj.content
+            # Add province context if available
+            province = state.get("province")
+            if province:
+                province_names = {
+                    "MB": "Manitoba",
+                    "ON": "Ontario", 
+                    "SK": "Saskatchewan",
+                    "AB": "Alberta",
+                    "BC": "British Columbia"
+                }
+                province_name = province_names.get(province, province)
+                province_context = f"\n\nIMPORTANT: You are answering questions about {province_name} ({province}) employment standards. Only reference laws and regulations that apply to {province_name}. Do not mix information from other provinces."
+                system_prompt = system_prompt + province_context
             logger.debug(
-                f"Using database system prompt: v{system_prompt_obj.version}"
+                f"Using database system prompt: v{system_prompt_obj.version}, province={province}"
             )
         else:
             # Fallback to hardcoded prompt if database fails
-            system_prompt = """You are a finance and payment expert assistant for Compaytence.
-Your role is to answer questions accurately based on the provided context.
+            # Include province context if available
+            province = state.get("province", "Canada")
+            province_context = ""
+            if province:
+                province_names = {
+                    "MB": "Manitoba",
+                    "ON": "Ontario", 
+                    "SK": "Saskatchewan",
+                    "AB": "Alberta",
+                    "BC": "British Columbia"
+                }
+                province_name = province_names.get(province, province)
+                province_context = f"\n\nIMPORTANT: You are answering questions about {province_name} ({province}) employment standards. Only reference laws and regulations that apply to {province_name}. Do not mix information from other provinces."
+            
+            system_prompt = f"""You are a Canadian Employment Standards HR Assistant specializing in provincial employment law.
+Your role is to answer questions accurately based on the provided context from official employment standards documents.
 
-If the context contains relevant information, use it to provide a detailed answer.
+{province_context}
+
+If the context contains relevant information, use it to provide a detailed answer with specific references.
 If the context is insufficient, clearly state what information is missing.
 
-Always be professional, accurate, and helpful."""
+Always be professional, accurate, and cite specific sections or sources when possible.
+Never provide legal advice - only informational guidance based on the documents provided."""
             logger.warning("Using fallback system prompt (database not available)")
 
         # Format conversation history for context
@@ -593,10 +642,13 @@ Please provide a comprehensive answer based on the context above."""
             except Exception as e:
                 logger.warning(f"Failed to track prompt usage: {e}")
 
+        # Preserve context_documents for confidence calculation
         return {
             "response": generated_text,
             "tokens_used": tokens_used,
             "reasoning": "Generated response based on retrieved context",
+            # Preserve context_documents from previous node
+            "context_documents": state.get("context_documents", []),
         }
 
     except Exception as e:
@@ -1077,6 +1129,79 @@ async def decision_node(state: AgentState) -> dict[str, Any]:
         }
 
 
+def extract_relevant_excerpt(content: str, query: str, max_length: int = 300) -> str:
+    """
+    Extract the most relevant excerpt from content based on query keywords.
+    
+    Finds the sentence or paragraph that best matches the query and returns
+    it with some surrounding context.
+    
+    Args:
+        content: Full content text
+        query: User's query to match against
+        max_length: Maximum length of excerpt to return
+        
+    Returns:
+        Most relevant excerpt from the content
+    """
+    if not content or not query:
+        # Fallback to first portion if no query
+        return content[:max_length] + ("..." if len(content) > max_length else "")
+    
+    # Extract keywords from query (remove common stop words)
+    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can', 'what', 'when', 'where', 'who', 'why', 'how', 'which', 'that', 'this', 'these', 'those'}
+    query_words = set(re.findall(r'\b\w+\b', query.lower()))
+    query_words = query_words - stop_words
+    
+    if not query_words:
+        # If no meaningful keywords, return first portion
+        return content[:max_length] + ("..." if len(content) > max_length else "")
+    
+    # Split content into sentences
+    sentences = re.split(r'(?<=[.!?])\s+', content)
+    
+    # Score each sentence based on keyword matches
+    scored_sentences = []
+    for i, sentence in enumerate(sentences):
+        sentence_lower = sentence.lower()
+        # Count keyword matches (weighted by word length - longer words are more specific)
+        matches = sum(len(word) for word in query_words if word in sentence_lower)
+        if matches > 0:
+            scored_sentences.append((i, sentence, matches))
+    
+    if not scored_sentences:
+        # No matches found, return first portion
+        return content[:max_length] + ("..." if len(content) > max_length else "")
+    
+    # Sort by match score (descending)
+    scored_sentences.sort(key=lambda x: x[2], reverse=True)
+    
+    # Get the best matching sentence
+    best_idx, best_sentence, _ = scored_sentences[0]
+    
+    # Try to include surrounding context (1 sentence before and after)
+    start_idx = max(0, best_idx - 1)
+    end_idx = min(len(sentences), best_idx + 2)
+    
+    excerpt = ' '.join(sentences[start_idx:end_idx])
+    
+    # Truncate if too long, but try to keep it meaningful
+    if len(excerpt) > max_length:
+        # Try to truncate at a sentence boundary
+        truncated = excerpt[:max_length]
+        last_period = truncated.rfind('.')
+        last_exclamation = truncated.rfind('!')
+        last_question = truncated.rfind('?')
+        last_sentence_end = max(last_period, last_exclamation, last_question)
+        
+        if last_sentence_end > max_length * 0.7:  # Only if we're keeping most of it
+            excerpt = truncated[:last_sentence_end + 1] + "..."
+        else:
+            excerpt = truncated + "..."
+    
+    return excerpt
+
+
 async def format_output_node(state: AgentState) -> dict[str, Any]:
     """
     Node: Format final output with sources and metadata.
@@ -1092,18 +1217,74 @@ async def format_output_node(state: AgentState) -> dict[str, Any]:
     try:
         logger.info("Formatting output")
 
-        # Format sources
-        sources = []
+        # Get query for extracting relevant excerpts
+        query = state.get("query", "")
+        
+        # First pass: collect all documents and their best matches
+        # Use a dict to deduplicate by document title, keeping the best match (highest similarity)
+        source_map = {}  # key: display_name, value: source dict with best similarity
+        
         for doc in state.get("context_documents", []):
-            sources.append(
-                {
-                    "content": doc.get("content", "")[:200],  # Truncate for response
-                    "source": doc.get("source", "unknown"),
-                    "timestamp": doc.get("timestamp"),
-                    "metadata": doc.get("metadata", {}),
-                    "similarity_score": doc.get("similarity", 0.0),
-                }
-            )
+            # Get document title/filename from search results (preferred)
+            document_title = doc.get("document_title") or doc.get("document_filename")
+            
+            # Fallback: Extract from chunk title if document info not available
+            if not document_title:
+                chunk_title = doc.get("title", "")
+                # Remove " (chunk X/Y)" suffix to get filename
+                document_title = chunk_title.split(" (chunk")[0] if chunk_title else None
+            
+            # Clean up the name for display
+            if document_title:
+                # Remove file extension for cleaner display
+                display_name = document_title.rsplit('.', 1)[0] if '.' in document_title else document_title
+                # Replace underscores with spaces
+                display_name = display_name.replace('_', ' ')
+                # Remove temporary file prefixes (tmp, temp, etc.)
+                if display_name.lower().startswith('tmp'):
+                    # Try to get a better name from metadata
+                    metadata = doc.get("metadata", {})
+                    original_file = metadata.get("original_file")
+                    if original_file:
+                        display_name = original_file.rsplit('.', 1)[0].replace('_', ' ')
+                    else:
+                        display_name = "Uploaded Document"
+                # Capitalize words for better readability
+                display_name = ' '.join(word.capitalize() for word in display_name.split())
+            else:
+                # Final fallback - use chunk ID to make it unique
+                chunk_id = doc.get("id", "")
+                source_type = doc.get("source", "unknown")
+                display_name = source_type.replace("_", " ").title()
+                if chunk_id:
+                    # Make it unique by appending a portion of the ID
+                    display_name = f"{display_name} ({chunk_id[:8]})"
+            
+            # Extract relevant excerpt that explains why it matched
+            full_content = doc.get("content", "")
+            relevant_excerpt = extract_relevant_excerpt(full_content, query, max_length=300)
+            similarity = doc.get("similarity", 0.0)
+            
+            # Create source entry
+            source_entry = {
+                "content": relevant_excerpt,  # Show why it matched, not just start of chunk
+                "source": display_name,  # Clean, readable document name
+                "timestamp": doc.get("timestamp") or doc.get("doc_timestamp"),
+                "metadata": doc.get("metadata", {}),
+                "similarity_score": similarity,
+            }
+            
+            # Deduplicate: keep only the best match (highest similarity) for each document
+            if display_name not in source_map:
+                source_map[display_name] = source_entry
+            else:
+                # Replace if this match has higher similarity
+                if similarity > source_map[display_name]["similarity_score"]:
+                    source_map[display_name] = source_entry
+        
+        # Convert map to list, sorted by similarity (descending)
+        sources = list(source_map.values())
+        sources.sort(key=lambda x: x["similarity_score"], reverse=True)
 
         return {"sources": sources}
 

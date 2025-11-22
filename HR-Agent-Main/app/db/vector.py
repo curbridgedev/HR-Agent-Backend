@@ -109,6 +109,7 @@ async def hybrid_search(
     table_name: str = "documents",
     match_threshold: Optional[float] = None,
     match_count: Optional[int] = None,
+    province: Optional[str] = None,  # Filter by province (MB, ON, SK, AB, BC, or None for all)
 ) -> List[Dict[str, Any]]:
     """
     Perform hybrid search (vector + keyword) for better results.
@@ -130,31 +131,69 @@ async def hybrid_search(
     count = match_count or settings.vector_max_results
 
     try:
-        # Sanitize query text for PostgreSQL full-text search
-        sanitized_query = sanitize_text_for_tsquery(query_text)
+        # NOTE: Do NOT sanitize query_text for ILIKE search
+        # The hybrid_search function uses ILIKE which needs plain text, not tsquery format
+        # Sanitization would break pattern matching
 
-        logger.debug(f"Hybrid search: original='{query_text}', sanitized='{sanitized_query}'")
+        logger.debug(f"Hybrid search: query='{query_text}', threshold={threshold}")
+        logger.debug(f"Search params: threshold={threshold}, count={count}, embedding_len={len(query_embedding)}")
+        logger.debug(f"Embedding type: {type(query_embedding)}, first 3 values: {query_embedding[:3] if len(query_embedding) > 0 else 'empty'}")
 
         # Use Supabase RPC function for hybrid search
-        # This combines vector similarity with PostgreSQL full-text search
+        # Pass original query text for ILIKE matching
+        rpc_params = {
+            "query_embedding": query_embedding,
+            "query_text": query_text,  # Use original text, not sanitized
+            "match_threshold": threshold,
+            "match_count": count,
+        }
+        
+        # Add province filter if provided
+        if province:
+            rpc_params["filter_province"] = province
+            logger.info(f"🔍 Province filter applied: {province}")
+        else:
+            logger.warning("⚠️ No province filter provided - will return documents from all provinces")
+        
+        logger.debug(f"RPC params: query_text='{query_text}', threshold={threshold}, count={count}, province={province}")
+        
         response = (
-            db.rpc(
-                "hybrid_search",
-                {
-                    "query_embedding": query_embedding,
-                    "query_text": sanitized_query,
-                    "match_threshold": threshold,
-                    "match_count": count,
-                },
-            )
+            db.rpc("hybrid_search", rpc_params)
             .execute()
         )
 
-        logger.info(f"Hybrid search successful: {len(response.data) if response.data else 0} results")
+        # Log province info for returned documents
+        if response.data and len(response.data) > 0:
+            provinces_found = set()
+            for doc in response.data:
+                # Try to get province from metadata or document info
+                doc_province = doc.get("metadata", {}).get("province") or "unknown"
+                provinces_found.add(doc_province)
+            logger.info(f"✅ Hybrid search successful: {len(response.data)} results")
+            if province:
+                logger.info(f"   Expected province: {province}, Found provinces in results: {provinces_found}")
+                if province not in provinces_found and "ALL" not in provinces_found:
+                    logger.warning(f"⚠️ WARNING: Province filter '{province}' applied but results contain provinces: {provinces_found}")
+        else:
+            logger.info(f"Hybrid search successful: {len(response.data) if response.data else 0} results")
+        logger.debug(f"Response data type: {type(response.data)}, Response count: {response.count if hasattr(response, 'count') else 'N/A'}")
+        
+        # Add detailed logging when no results
+        if not response.data or len(response.data) == 0:
+            logger.warning(f"❌ Hybrid search returned 0 results!")
+            logger.warning(f"   Query: '{query_text}'")
+            logger.warning(f"   Threshold: {threshold}")
+            logger.warning(f"   Embedding length: {len(query_embedding)}")
+            logger.warning(f"   Response has data attr: {hasattr(response, 'data')}")
+            logger.warning(f"   Response data value: {response.data}")
+            
+            # Try direct query to verify chunks exist
+            logger.warning(f"   💡 Try lowering VECTOR_SIMILARITY_THRESHOLD in .env or check if chunks exist")
+        
         return response.data if response.data else []
 
     except Exception as e:
-        logger.error(f"Hybrid search failed: {e}")
+        logger.error(f"Hybrid search failed: {e}", exc_info=True)
         # Fallback to vector-only search if hybrid fails
         logger.warning("Falling back to vector-only search")
         return await vector_search(db, query_embedding, table_name, match_threshold, match_count)

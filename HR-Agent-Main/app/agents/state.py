@@ -19,6 +19,7 @@ class AgentState(TypedDict):
     query: str
     session_id: str
     user_id: str | None
+    province: str | None  # Canadian province context (MB, ON, SK, AB, BC)
     conversation_history: list[dict[str, Any]]  # Previous messages in this session
 
     # Query analysis

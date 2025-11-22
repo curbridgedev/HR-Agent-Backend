@@ -38,6 +38,26 @@ async def process_chat(request: ChatRequest) -> ChatResponse:
     try:
         logger.info(f"Processing chat request: session_id={request.session_id}")
 
+        # Get province from session (locked in) or use request province for new sessions
+        from app.db.supabase import get_supabase_client
+        supabase = get_supabase_client()
+        session_response = (
+            supabase.table("chat_sessions")
+            .select("province, message_count")
+            .eq("session_id", request.session_id)
+            .execute()
+        )
+        
+        # Use session province if session exists and has messages, otherwise use request province
+        if session_response.data and session_response.data[0].get("message_count", 0) > 0:
+            # Session has messages - use locked province
+            province = session_response.data[0].get("province", request.province or "MB")
+            logger.debug(f"Using locked province from session: {province}")
+        else:
+            # New session - use request province or default
+            province = request.province or "MB"
+            logger.debug(f"Using province from request for new session: {province}")
+
         # Import agent graph
         from app.agents.graph import get_agent_graph
 
@@ -49,6 +69,7 @@ async def process_chat(request: ChatRequest) -> ChatResponse:
             "query": request.message,
             "session_id": request.session_id,
             "user_id": request.user_id,
+            "province": province,  # Use session province (locked) or request province (new)
             "conversation_history": conversation_history,
             "context_documents": [],
             "context_text": "",
@@ -143,7 +164,7 @@ async def process_chat(request: ChatRequest) -> ChatResponse:
             role="user",
             content=request.message,
             user_id=request.user_id,
-            province=request.province or "MB",
+            province=province,  # Use the province we determined (session or request)
             metadata={"platform": "api"},
         )
 
@@ -154,7 +175,7 @@ async def process_chat(request: ChatRequest) -> ChatResponse:
             confidence=response.confidence,
             escalated=response.escalated,
             user_id=request.user_id,
-            province=request.province or "MB",
+            province=province,  # Use the province we determined (session or request)
             metadata={
                 "tokens_used": response.tokens_used,
                 "response_time_ms": response.response_time_ms,
@@ -197,6 +218,26 @@ async def process_chat_stream(request: ChatRequest) -> AsyncGenerator[ChatStream
     try:
         logger.info(f"Processing streaming chat request: session_id={request.session_id}")
 
+        # Get province from session (locked in) or use request province for new sessions
+        from app.db.supabase import get_supabase_client
+        supabase = get_supabase_client()
+        session_response = (
+            supabase.table("chat_sessions")
+            .select("province, message_count")
+            .eq("session_id", request.session_id)
+            .execute()
+        )
+        
+        # Use session province if session exists and has messages, otherwise use request province
+        if session_response.data and session_response.data[0].get("message_count", 0) > 0:
+            # Session has messages - use locked province
+            province = session_response.data[0].get("province", request.province or "MB")
+            logger.debug(f"Using locked province from session: {province}")
+        else:
+            # New session - use request province or default
+            province = request.province or "MB"
+            logger.debug(f"Using province from request for new session: {province}")
+
         # Import agent graph
         from app.agents.graph import get_agent_graph
 
@@ -208,6 +249,7 @@ async def process_chat_stream(request: ChatRequest) -> AsyncGenerator[ChatStream
             "query": request.message,
             "session_id": request.session_id,
             "user_id": request.user_id,
+            "province": province,  # Use session province (locked) or request province (new)
             "conversation_history": conversation_history,
             "context_documents": [],
             "context_text": "",
@@ -311,7 +353,7 @@ async def process_chat_stream(request: ChatRequest) -> AsyncGenerator[ChatStream
                 role="user",
                 content=request.message,
                 user_id=request.user_id,
-                province=request.province or "MB",
+                province=province,  # Use the province we determined (session or request)
                 metadata={"platform": "api", "streaming": True},
             )
 
@@ -322,7 +364,7 @@ async def process_chat_stream(request: ChatRequest) -> AsyncGenerator[ChatStream
                 confidence=final_state.get("confidence_score", 0.0),
                 escalated=final_state.get("escalated", False),
                 user_id=request.user_id,
-                province=request.province or "MB",
+                province=province,  # Use the province we determined (session or request)
                 metadata={
                     "tokens_used": final_state.get("tokens_used", 0),
                     "sources_count": len(sources),
@@ -382,8 +424,12 @@ async def ensure_chat_session(session_id: str, user_id: str = None, province: st
         )
 
         if response.data:
-            # Session exists, update province if provided
-            if province:
+            # Session exists - check if it has messages to lock province
+            session_data = response.data[0]
+            message_count = session_data.get("message_count", 0)
+            
+            # Only update province if session has no messages (new session)
+            if province and message_count == 0:
                 update_response = (
                     supabase.table("chat_sessions")
                     .update({"province": province})
@@ -391,7 +437,14 @@ async def ensure_chat_session(session_id: str, user_id: str = None, province: st
                     .execute()
                 )
                 if update_response.data:
-                    logger.debug(f"Updated province for session {session_id}: {province}")
+                    logger.debug(f"Updated province for new session {session_id}: {province}")
+            elif province and message_count > 0:
+                # Session has messages - use existing province, don't update
+                existing_province = session_data.get("province", "MB")
+                logger.debug(
+                    f"Session {session_id} has {message_count} messages - "
+                    f"province locked to {existing_province}, ignoring update to {province}"
+                )
             return True
 
         # Create new session

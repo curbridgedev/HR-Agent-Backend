@@ -495,7 +495,16 @@ async def get_formatted_prompt(
             )
             if fallback:
                 logger.info(f"Using fallback for prompt '{name}'")
-                return fallback.format(**variables), None
+                # Use safe formatting that handles JSON braces
+                try:
+                    return fallback.format(**variables), None
+                except KeyError as e:
+                    # If format fails (e.g., JSON braces in prompt), use simple replacement
+                    logger.debug(f"Format failed for fallback prompt, using simple replacement: {e}")
+                    formatted = fallback
+                    for key, value in variables.items():
+                        formatted = formatted.replace(f"{{{key}}}", str(value))
+                    return formatted, None
             raise ValueError(
                 f"Prompt '{name}' not found and no fallback provided. "
                 f"Check that the prompt exists and is active in the database."
@@ -508,5 +517,14 @@ async def get_formatted_prompt(
             logger.warning(
                 f"Using fallback for prompt '{name}' due to database error"
             )
-            return fallback.format(**variables), None
+            # Use safe formatting that handles JSON braces
+            try:
+                return fallback.format(**variables), None
+            except KeyError as format_error:
+                # If format fails (e.g., JSON braces in prompt), use simple replacement
+                logger.debug(f"Format failed for fallback prompt, using simple replacement: {format_error}")
+                formatted = fallback
+                for key, value in variables.items():
+                    formatted = formatted.replace(f"{{{key}}}", str(value))
+                return formatted, None
         raise
