@@ -129,7 +129,7 @@ class Settings(BaseSettings):
     # Document Processing - Docling
     docling_enabled: bool = True
     docling_max_file_size_mb: int = 50
-    docling_supported_formats: str = "pdf,docx,xlsx,pptx,txt,md"
+    docling_supported_formats: str = "pdf,doc,docx,xlsx,pptx,txt,md"
     docling_ocr_enabled: bool = True
     docling_preserve_tables: bool = True
 
@@ -170,7 +170,7 @@ class Settings(BaseSettings):
 
     # File Storage & Uploads
     max_upload_size_mb: int = 50
-    allowed_upload_extensions: str = "pdf,docx,xlsx,pptx,txt,md,csv"
+    allowed_upload_extensions: str = "pdf,doc,docx,xlsx,pptx,txt,md,csv"
     upload_temp_dir: str = "/tmp/uploads"
     storage_backend: Literal["supabase", "s3", "local"] = "supabase"
     storage_bucket: str = "hr-agent-documents"

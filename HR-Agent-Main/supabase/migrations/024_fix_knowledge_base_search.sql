@@ -98,3 +98,5 @@ COMMENT ON FUNCTION match_documents(vector(1536), float, int) IS
 COMMENT ON FUNCTION hybrid_search(vector(1536), text, float, int) IS 
     'Hybrid search combining vector similarity (70%) and keyword matching (30%) on knowledge_base table';
 
+
+

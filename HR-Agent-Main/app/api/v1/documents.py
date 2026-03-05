@@ -96,6 +96,7 @@ async def upload_document(
             result = await ingestion_service.ingest_document(
                 file_path=temp_path,
                 title=title or file.filename,  # Use original filename if no title provided
+                original_filename=file.filename,  # Preserve original filename (temp path would show tmp...)
                 source=source,
                 province=province,  # Pass province for filtering
                 metadata=doc_metadata,
@@ -186,6 +187,7 @@ async def upload_documents_bulk(
                 result = await ingestion_service.ingest_document(
                     file_path=temp_path,
                     title=file.filename,  # Use original filename as title
+                    original_filename=file.filename,  # Preserve original filename (temp path would show tmp...)
                     source=source,
                     province=province,  # Pass province for filtering
                 )
@@ -257,10 +259,12 @@ async def list_documents(
         documents = [
             DocumentListItem(
                 id=doc["id"],
-                title=doc.get("filename", doc.get("original_filename", "Untitled")),
-                source="document",  # documents table doesn't have source field
+                title=doc.get("original_filename", doc.get("filename", doc.get("title", "Untitled"))),
+                source=doc.get("source", "document"),
                 processing_status=doc.get("processing_status", "unknown"),
                 created_at=doc["created_at"],
+                province=doc.get("province"),
+                original_filename=doc.get("original_filename", doc.get("filename")),
                 metadata=doc.get("metadata", {}),
             )
             for doc in (result.data or [])

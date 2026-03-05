@@ -40,6 +40,7 @@ class DocumentIngestionService:
         self,
         file_path: Path,
         title: str | None = None,
+        original_filename: str | None = None,
         source: str = "admin_upload",
         province: str | None = None,
         metadata: dict[str, Any] | None = None,
@@ -48,8 +49,9 @@ class DocumentIngestionService:
         Ingest a document through the complete pipeline.
 
         Args:
-            file_path: Path to the document file
+            file_path: Path to the document file (may be a temp path like /tmp/tmpXXX.docx)
             title: Document title (auto-generated from filename if not provided)
+            original_filename: Original uploaded filename when file_path is a temp file
             source: Source of the document
             province: Canadian province code (MB, ON, SK, AB, BC, or ALL for federal/multi-province)
             metadata: Additional metadata
@@ -66,13 +68,16 @@ class DocumentIngestionService:
         """
         document_id = str(uuid4())
         
+        # Use original_filename when provided (e.g. from temp file uploads); otherwise file_path.name
+        stored_filename = original_filename or file_path.name
+
         # Generate a nice title from filename
         if title:
-            # Use provided title as-is
+            # Use provided title as-is (typically the original filename)
             display_title = title
         else:
             # Clean up filename for display
-            filename = file_path.stem  # Get filename without extension
+            filename = Path(stored_filename).stem  # Get filename without extension
             # Replace underscores and hyphens with spaces
             display_title = filename.replace('_', ' ').replace('-', ' ')
             # Remove common temporary prefixes
@@ -164,8 +169,8 @@ class DocumentIngestionService:
                 "title": title,  # Set title (required for display)
                 "content": content_preview,  # Preview/summary (full content is in chunks)
                 "source": source,  # Set source (admin_upload, api_upload, etc.)
-                "filename": file_path.name,
-                "original_filename": file_path.name,
+                "filename": stored_filename,
+                "original_filename": stored_filename,
                 "file_type": file_path.suffix.lstrip('.') or 'unknown',
                 "file_size_bytes": file_path.stat().st_size if file_path.exists() else 0,
                 "storage_path": str(file_path),
@@ -177,8 +182,8 @@ class DocumentIngestionService:
             
             # Add province if provided
             if province:
-                # Validate province code
-                valid_provinces = ["MB", "ON", "SK", "AB", "BC", "ALL"]
+                # Validate province code (all Canadian provinces + ALL)
+                valid_provinces = ["AB", "BC", "MB", "NB", "NL", "NS", "ON", "PE", "QC", "SK", "ALL"]
                 if province.upper() in valid_provinces:
                     doc_record["province"] = province.upper()
                     logger.info(f"[{document_id}] Document tagged with province: {province.upper()}")

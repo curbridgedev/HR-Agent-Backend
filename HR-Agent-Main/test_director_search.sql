@@ -68,3 +68,5 @@ FROM hybrid_search(
 LEFT JOIN documents d ON kb.id::text = d.id::text
 LIMIT 5;
 
+
+

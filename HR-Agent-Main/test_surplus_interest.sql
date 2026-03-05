@@ -31,3 +31,5 @@ FROM knowledge_base kb, test_query tq
 WHERE content ILIKE '%surplus interest%'
 LIMIT 1;
 
+
+

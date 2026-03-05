@@ -55,3 +55,5 @@ WHERE kb.content ILIKE '%Director%'
 ORDER BY similarity DESC
 LIMIT 10;
 
+
+

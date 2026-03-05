@@ -18,7 +18,7 @@ from app.utils.langfuse_client import create_callback_handler
 logger = get_logger(__name__)
 
 
-async def process_chat(request: ChatRequest) -> ChatResponse:
+async def process_chat(request: ChatRequest, user_id_override: str | None = None) -> ChatResponse:
     """
     Process a chat request and generate a response.
 
@@ -29,14 +29,16 @@ async def process_chat(request: ChatRequest) -> ChatResponse:
 
     Args:
         request: Chat request with message and context
+        user_id_override: User ID from auth token when request.user_id is missing (ensures sidebar shows session)
 
     Returns:
         Chat response with message, confidence, and sources
     """
     start_time = time.time()
+    effective_user_id = user_id_override or request.user_id
 
     try:
-        logger.info(f"Processing chat request: session_id={request.session_id}")
+        logger.info(f"Processing chat request: session_id={request.session_id}, user_id={effective_user_id}")
 
         # Get province from session (locked in) or use request province for new sessions
         from app.db.supabase import get_supabase_client
@@ -48,15 +50,17 @@ async def process_chat(request: ChatRequest) -> ChatResponse:
             .execute()
         )
         
-        # Use session province if session exists and has messages, otherwise use request province
-        if session_response.data and session_response.data[0].get("message_count", 0) > 0:
-            # Session has messages - use locked province
-            province = session_response.data[0].get("province", request.province or "MB")
+        # Use session province if session exists and has messages (and not "ALL"), otherwise use request province
+        session_province = session_response.data[0].get("province") if session_response.data else None
+        message_count = session_response.data[0].get("message_count", 0) if session_response.data else 0
+        if session_response.data and message_count > 0 and session_province and session_province != "ALL":
+            # Session has messages and specific province - use locked province
+            province = session_province
             logger.debug(f"Using locked province from session: {province}")
         else:
-            # New session - use request province or default
+            # New session, or "ALL" selected (allows switching), or no session - use request province
             province = request.province or "MB"
-            logger.debug(f"Using province from request for new session: {province}")
+            logger.info(f"Using province from request: {province!r}")
 
         # Import agent graph
         from app.agents.graph import get_agent_graph
@@ -163,7 +167,7 @@ async def process_chat(request: ChatRequest) -> ChatResponse:
             session_id=request.session_id,
             role="user",
             content=request.message,
-            user_id=request.user_id,
+            user_id=effective_user_id,
             province=province,  # Use the province we determined (session or request)
             metadata={"platform": "api"},
         )
@@ -174,7 +178,7 @@ async def process_chat(request: ChatRequest) -> ChatResponse:
             content=response.message,
             confidence=response.confidence,
             escalated=response.escalated,
-            user_id=request.user_id,
+            user_id=effective_user_id,
             province=province,  # Use the province we determined (session or request)
             metadata={
                 "tokens_used": response.tokens_used,
@@ -202,7 +206,9 @@ async def process_chat(request: ChatRequest) -> ChatResponse:
         )
 
 
-async def process_chat_stream(request: ChatRequest) -> AsyncGenerator[ChatStreamChunk, None]:
+async def process_chat_stream(
+    request: ChatRequest, user_id_override: str | None = None
+) -> AsyncGenerator[ChatStreamChunk, None]:
     """
     Process a chat request with streaming response.
 
@@ -211,12 +217,18 @@ async def process_chat_stream(request: ChatRequest) -> AsyncGenerator[ChatStream
 
     Args:
         request: Chat request with message and context
+        user_id_override: User ID from auth token when request.user_id is missing (ensures sidebar shows session)
 
     Yields:
         Chat stream chunks with partial responses
     """
+    effective_user_id = user_id_override or request.user_id
+
     try:
-        logger.info(f"Processing streaming chat request: session_id={request.session_id}")
+        logger.info(
+            f"Processing streaming chat request: session_id={request.session_id}, "
+            f"user_id={effective_user_id}, request.province={request.province!r}"
+        )
 
         # Get province from session (locked in) or use request province for new sessions
         from app.db.supabase import get_supabase_client
@@ -228,15 +240,17 @@ async def process_chat_stream(request: ChatRequest) -> AsyncGenerator[ChatStream
             .execute()
         )
         
-        # Use session province if session exists and has messages, otherwise use request province
-        if session_response.data and session_response.data[0].get("message_count", 0) > 0:
-            # Session has messages - use locked province
-            province = session_response.data[0].get("province", request.province or "MB")
+        # Use session province if session exists and has messages (and not "ALL"), otherwise use request province
+        session_province = session_response.data[0].get("province") if session_response.data else None
+        message_count = session_response.data[0].get("message_count", 0) if session_response.data else 0
+        if session_response.data and message_count > 0 and session_province and session_province != "ALL":
+            # Session has messages and specific province - use locked province
+            province = session_province
             logger.debug(f"Using locked province from session: {province}")
         else:
-            # New session - use request province or default
+            # New session, or "ALL" selected (allows switching), or no session - use request province
             province = request.province or "MB"
-            logger.debug(f"Using province from request for new session: {province}")
+            logger.info(f"Using province from request: {province!r}")
 
         # Import agent graph
         from app.agents.graph import get_agent_graph
@@ -338,21 +352,12 @@ async def process_chat_stream(request: ChatRequest) -> AsyncGenerator[ChatStream
                 for source in final_state.get("sources", [])
             ]
 
-            # Send final chunk with confidence and sources
-            final_chunk = ChatStreamChunk(
-                chunk="",
-                is_final=True,
-                confidence=final_state.get("confidence_score", 0.0),
-                sources=sources,
-            )
-            yield final_chunk
-
-            # Save user message and assistant response to database
+            # Save to database BEFORE yielding final chunk so sidebar refetch sees the session
             await save_chat_message(
                 session_id=request.session_id,
                 role="user",
                 content=request.message,
-                user_id=request.user_id,
+                user_id=effective_user_id,
                 province=province,  # Use the province we determined (session or request)
                 metadata={"platform": "api", "streaming": True},
             )
@@ -363,7 +368,7 @@ async def process_chat_stream(request: ChatRequest) -> AsyncGenerator[ChatStream
                 content=accumulated_response,
                 confidence=final_state.get("confidence_score", 0.0),
                 escalated=final_state.get("escalated", False),
-                user_id=request.user_id,
+                user_id=effective_user_id,
                 province=province,  # Use the province we determined (session or request)
                 metadata={
                     "tokens_used": final_state.get("tokens_used", 0),
@@ -374,6 +379,15 @@ async def process_chat_stream(request: ChatRequest) -> AsyncGenerator[ChatStream
 
             # Update session metadata (title, last_message, message_count)
             await update_session_metadata(request.session_id)
+
+            # Send final chunk AFTER save so sidebar refetch sees the new session
+            final_chunk = ChatStreamChunk(
+                chunk="",
+                is_final=True,
+                confidence=final_state.get("confidence_score", 0.0),
+                sources=sources,
+            )
+            yield final_chunk
 
             # Flush LangFuse trace
             if langfuse_handler:
@@ -397,6 +411,24 @@ async def process_chat_stream(request: ChatRequest) -> AsyncGenerator[ChatStream
         yield error_chunk
 
 
+def _province_for_db(province: str) -> str | None:
+    """
+    Convert province for database storage.
+    Store NULL when province is 'ALL' - works with migration 018 constraint
+    (allows NULL but not 'ALL' until migration 029 is applied).
+    """
+    if not province or province == "ALL":
+        return None
+    return province
+
+
+def _province_from_db(province) -> str:
+    """Convert province from database (NULL -> 'ALL') for API response."""
+    if province is None:
+        return "ALL"
+    return province or "MB"
+
+
 async def ensure_chat_session(session_id: str, user_id: str = None, province: str = "MB") -> bool:
     """
     Ensure a chat session exists in the database.
@@ -405,7 +437,7 @@ async def ensure_chat_session(session_id: str, user_id: str = None, province: st
     Args:
         session_id: Session identifier
         user_id: Optional user identifier
-        province: Canadian province context (MB, ON, SK, AB, BC)
+        province: Canadian province context (MB, ON, SK, AB, BC, or ALL)
 
     Returns:
         True if session exists or was created successfully
@@ -415,10 +447,10 @@ async def ensure_chat_session(session_id: str, user_id: str = None, province: st
 
         supabase = get_supabase_client()
 
-        # Check if session exists
+        # Check if session exists (need province and message_count for lock logic)
         response = (
             supabase.table("chat_sessions")
-            .select("session_id")
+            .select("session_id, province, message_count")
             .eq("session_id", session_id)
             .execute()
         )
@@ -427,20 +459,21 @@ async def ensure_chat_session(session_id: str, user_id: str = None, province: st
             # Session exists - check if it has messages to lock province
             session_data = response.data[0]
             message_count = session_data.get("message_count", 0)
-            
-            # Only update province if session has no messages (new session)
-            if province and message_count == 0:
+            existing_province = session_data.get("province")  # None means "ALL"
+
+            # Update province if: new session (no messages), or "ALL" (None) allows switching
+            if province and (message_count == 0 or existing_province is None):
+                province_update = None if province == "ALL" else (province or "MB")
                 update_response = (
                     supabase.table("chat_sessions")
-                    .update({"province": province})
+                    .update({"province": province_update})
                     .eq("session_id", session_id)
                     .execute()
                 )
                 if update_response.data:
-                    logger.debug(f"Updated province for new session {session_id}: {province}")
-            elif province and message_count > 0:
-                # Session has messages - use existing province, don't update
-                existing_province = session_data.get("province", "MB")
+                    logger.debug(f"Updated province for session {session_id}: {province}")
+            elif province and message_count > 0 and existing_province is not None:
+                # Session has messages and specific province - locked, don't update
                 logger.debug(
                     f"Session {session_id} has {message_count} messages - "
                     f"province locked to {existing_province}, ignoring update to {province}"
@@ -449,12 +482,14 @@ async def ensure_chat_session(session_id: str, user_id: str = None, province: st
 
         # Create new session
         # Note: 'active' is a generated column (computed from 'is_active')
+        # Use NULL for "ALL" - works with migration 018 (allows NULL, not "ALL" until 029)
+        province_storage = None if province == "ALL" else (province or "MB")
         session_data = {
             "session_id": session_id,
             "user_id": user_id,
             "is_active": True,
             "metadata": {},
-            "province": province or "MB",  # Default to Manitoba
+            "province": province_storage,
         }
 
         logger.debug(f"Attempting to create session with data: {session_data}")
@@ -602,7 +637,8 @@ async def save_chat_message(
             logger.error(f"Failed to ensure chat session exists: {session_id}")
             raise ValueError(f"Chat session {session_id} could not be created or found")
 
-        # Prepare message data
+        # Prepare message data - use NULL for "ALL" (migration 018 allows NULL)
+        province_storage = None if province == "ALL" else (province or "MB")
         message_data = {
             "session_id": session_id,
             "role": role,
@@ -610,7 +646,7 @@ async def save_chat_message(
             "confidence": confidence,
             "escalated": escalated,
             "metadata": metadata or {},
-            "province": province or "MB",  # Add province to message
+            "province": province_storage,
         }
 
         # Insert message
@@ -816,14 +852,14 @@ async def get_sessions_list(
         # Calculate total pages
         total_pages = math.ceil(total / page_size) if total > 0 else 1
 
-        # Convert to SessionSummary objects
+        # Convert to SessionSummary objects - map NULL province to "ALL"
         sessions = [
             SessionSummary(
                 session_id=session["session_id"],
                 title=session.get("title", "Untitled Conversation"),
                 last_message=session.get("last_message", ""),
                 message_count=session.get("message_count", 0),
-                province=session.get("province", "MB"),
+                province=_province_from_db(session.get("province")),
                 created_at=session["created_at"],
                 updated_at=session["updated_at"],
             )

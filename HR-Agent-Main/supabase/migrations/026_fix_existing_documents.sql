@@ -46,3 +46,5 @@ COMMENT ON COLUMN documents.content IS 'Content preview/summary (full content in
 COMMENT ON COLUMN documents.source IS 'Source of document (admin_upload, api_upload, etc.)';
 COMMENT ON COLUMN documents.province IS 'Canadian province (MB, ON, SK, AB, BC, or ALL for federal/multi-province)';
 
+
+

@@ -52,3 +52,5 @@ WHERE title IS NOT NULL;
 -- Add comment
 COMMENT ON COLUMN documents.title IS 'Human-readable document title (cleaned filename without extension)';
 
+
+

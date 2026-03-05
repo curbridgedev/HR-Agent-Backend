@@ -35,7 +35,7 @@ class ChatRequest(BaseRequest):
         None, description="Previous messages for context"
     )
     stream: bool = Field(False, description="Enable streaming response via SSE")
-    province: Optional[str] = Field("MB", description="Canadian province context (MB, ON, SK, AB, BC)")
+    province: Optional[str] = Field("MB", description="Canadian province context (MB, ON, SK, AB, BC, or ALL for all provinces)")
 
 
 class SourceReference(BaseResponse):
@@ -95,7 +95,7 @@ class SessionSummary(BaseResponse):
     title: str = Field(..., description="First user message (truncated to 50 chars)")
     last_message: str = Field(..., description="Last message content (truncated to 100 chars)")
     message_count: int = Field(..., description="Total number of messages in session")
-    province: Optional[str] = Field("MB", description="Province context for the session")
+    province: Optional[str] = Field("MB", description="Province context for the session (MB, ON, SK, AB, BC, or ALL)")
     created_at: datetime = Field(..., description="Session creation timestamp")
     updated_at: datetime = Field(..., description="Last message timestamp")
 

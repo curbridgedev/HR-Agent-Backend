@@ -55,3 +55,5 @@ FROM knowledge_base
 WHERE embedding IS NOT NULL
 LIMIT 3;
 
+
+

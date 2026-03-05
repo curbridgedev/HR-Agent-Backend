@@ -31,3 +31,5 @@ WHERE kb.content ILIKE '%Director%'
 ORDER BY similarity_score DESC
 LIMIT 10;
 
+
+

@@ -14,6 +14,7 @@ from app.db.supabase import get_supabase_client
 from app.models.analytics import (
     SessionsAnalyticsResponse,
     SessionBreakdown,
+    ProvinceBreakdown,
     DateRange,
     DeflectionRateResponse,
     DeflectionBreakdown,
@@ -63,14 +64,14 @@ async def get_sessions_analytics(
 
         # Query chat_sessions table with date aggregation
         if period == "all-time":
-            # Get total count only
-            total_response = db.table("chat_sessions").select(
-                "id", count="exact"
+            # Get total count and province breakdown
+            all_sessions_response = db.table("chat_sessions").select(
+                "id,province"
             ).gte("created_at", start_date.isoformat()).lte(
                 "created_at", end_date.isoformat()
             ).execute()
 
-            total_sessions = total_response.count if total_response.count is not None else 0
+            total_sessions = len(all_sessions_response.data) if all_sessions_response.data else 0
 
             breakdown = [
                 SessionBreakdown(
@@ -80,10 +81,20 @@ async def get_sessions_analytics(
                 )
             ]
 
+            # Province breakdown for all-time (includes ALL)
+            from collections import Counter
+            province_counts = Counter(
+                s.get("province") or "MB" for s in (all_sessions_response.data or [])
+            )
+            by_province = [
+                ProvinceBreakdown(province=p, session_count=c)
+                for p, c in province_counts.most_common()
+            ]
+
         else:
             # Use simple query and manual aggregation (no custom SQL functions needed)
             sessions_response = db.table("chat_sessions").select(
-                "id,user_id,created_at"
+                "id,user_id,created_at,province"
             ).gte("created_at", start_date.isoformat()).lte(
                 "created_at", end_date.isoformat()
             ).execute()
@@ -122,11 +133,22 @@ async def get_sessions_analytics(
 
             total_sessions = sum(b.session_count for b in breakdown)
 
+            # Province breakdown (includes ALL for "All Provinces" conversations)
+            from collections import Counter
+            province_counts = Counter(
+                s.get("province") or "MB" for s in sessions_response.data
+            )
+            by_province = [
+                ProvinceBreakdown(province=p, session_count=c)
+                for p, c in province_counts.most_common()
+            ]
+
         return SessionsAnalyticsResponse(
             period=period,
             total_sessions=total_sessions,
             date_range=DateRange(start=start_date, end=end_date),
-            breakdown=breakdown
+            breakdown=breakdown,
+            by_province=by_province if by_province else None
         )
 
     except Exception as e:

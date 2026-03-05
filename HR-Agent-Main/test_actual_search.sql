@@ -20,3 +20,5 @@ FROM hybrid_search(
 -- If this returns 0 rows, there's still a problem with the function
 -- If this returns rows, then the issue is with the parameters being passed from the backend
 
+
+

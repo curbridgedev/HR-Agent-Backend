@@ -406,12 +406,14 @@ async def retrieve_context_node(state: AgentState) -> dict[str, Any]:
         # Perform hybrid search with province filter
         db = get_supabase_client()
         province = state.get("province")  # Get province from state
+        # When "ALL" or empty, search across all provinces (no filter)
+        province_for_search = None if (not province or province == "ALL") else province
         
         if not province:
             logger.warning(f"⚠️ No province in state for query: {state['query'][:50]}...")
             logger.warning(f"   State keys: {list(state.keys())}")
         
-        logger.info(f"🔍 Retrieving context with province filter: {province or 'NONE'}")
+        logger.info(f"🔍 Retrieving context with province filter: {province_for_search or 'ALL (no filter)'}")
         
         documents = await hybrid_search(
             db=db,
@@ -419,17 +421,17 @@ async def retrieve_context_node(state: AgentState) -> dict[str, Any]:
             query_text=state["query"],
             match_threshold=final_threshold,
             match_count=final_max_results,
-            province=province,  # Filter by province
+            province=province_for_search,  # None = all provinces, specific code = filter
         )
         
-        if province:
-            logger.info(f"✅ Province filter '{province}' applied: {len(documents)} results")
+        if province_for_search:
+            logger.info(f"✅ Province filter '{province_for_search}' applied: {len(documents)} results")
             # Check if any documents have wrong province
             for doc in documents[:3]:  # Check first 3
                 doc_title = doc.get("document_title") or doc.get("title", "unknown")
                 logger.debug(f"   Document: {doc_title[:50]}...")
         else:
-            logger.warning(f"⚠️ No province filter - returned {len(documents)} results from all provinces")
+            logger.info(f"✅ No province filter - returned {len(documents)} results from all provinces")
 
         # Format context text
         context_text = ""
@@ -506,16 +508,18 @@ async def generate_response_node(state: AgentState) -> dict[str, Any]:
             system_prompt = system_prompt_obj.content
             # Add province context if available
             province = state.get("province")
-            if province:
-                province_names = {
-                    "MB": "Manitoba",
-                    "ON": "Ontario", 
-                    "SK": "Saskatchewan",
-                    "AB": "Alberta",
-                    "BC": "British Columbia"
-                }
+            province_names = {
+                "AB": "Alberta", "BC": "British Columbia", "MB": "Manitoba",
+                "NB": "New Brunswick", "NL": "Newfoundland and Labrador",
+                "NS": "Nova Scotia", "ON": "Ontario", "PE": "Prince Edward Island",
+                "QC": "Quebec", "SK": "Saskatchewan",
+            }
+            if province and province != "ALL":
                 province_name = province_names.get(province, province)
                 province_context = f"\n\nIMPORTANT: You are answering questions about {province_name} ({province}) employment standards. Only reference laws and regulations that apply to {province_name}. Do not mix information from other provinces."
+                system_prompt = system_prompt + province_context
+            elif province == "ALL":
+                province_context = "\n\nIMPORTANT: You are answering questions about employment standards across all Canadian provinces. When relevant, specify which province each regulation or policy applies to. The context may include documents from multiple provinces."
                 system_prompt = system_prompt + province_context
             logger.debug(
                 f"Using database system prompt: v{system_prompt_obj.version}, province={province}"
@@ -525,16 +529,17 @@ async def generate_response_node(state: AgentState) -> dict[str, Any]:
             # Include province context if available
             province = state.get("province", "Canada")
             province_context = ""
-            if province:
-                province_names = {
-                    "MB": "Manitoba",
-                    "ON": "Ontario", 
-                    "SK": "Saskatchewan",
-                    "AB": "Alberta",
-                    "BC": "British Columbia"
-                }
+            province_names = {
+                "AB": "Alberta", "BC": "British Columbia", "MB": "Manitoba",
+                "NB": "New Brunswick", "NL": "Newfoundland and Labrador",
+                "NS": "Nova Scotia", "ON": "Ontario", "PE": "Prince Edward Island",
+                "QC": "Quebec", "SK": "Saskatchewan",
+            }
+            if province and province != "ALL":
                 province_name = province_names.get(province, province)
                 province_context = f"\n\nIMPORTANT: You are answering questions about {province_name} ({province}) employment standards. Only reference laws and regulations that apply to {province_name}. Do not mix information from other provinces."
+            elif province == "ALL":
+                province_context = "\n\nIMPORTANT: You are answering questions about employment standards across all Canadian provinces. When relevant, specify which province each regulation or policy applies to. The context may include documents from multiple provinces."
             
             system_prompt = f"""You are a Canadian Employment Standards HR Assistant specializing in provincial employment law.
 Your role is to answer questions accurately based on the provided context from official employment standards documents.

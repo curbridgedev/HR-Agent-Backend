@@ -90,7 +90,9 @@ class DoclingProcessor:
             # Route to appropriate processor
             if file_ext in ["pdf"]:
                 result = await self._process_pdf(file_path)
-            elif file_ext in ["docx", "doc"]:
+            elif file_ext == "doc":
+                result = await self._process_doc(file_path)
+            elif file_ext == "docx":
                 result = await self._process_docx(file_path)
             elif file_ext in ["xlsx", "xls"]:
                 result = await self._process_excel(file_path)
@@ -170,6 +172,36 @@ class DoclingProcessor:
         except Exception as e:
             logger.error(f"Fallback PDF processing failed: {e}")
             raise ValueError(f"Could not process PDF: {e}")
+
+    async def _process_doc(self, file_path: Path) -> Dict[str, Any]:
+        """Process legacy .DOC (Word 97-2003) using doc2txt. Docling does not support .DOC."""
+        try:
+            from doc2txt import extract_text
+
+            # Run in thread since extract_text is sync/blocking
+            import asyncio
+            content = await asyncio.to_thread(
+                extract_text, str(file_path), True  # optimize_format=True
+            )
+
+            return {
+                "content": content or "",
+                "metadata": {
+                    "title": file_path.stem,
+                    "file_type": "doc",
+                    "has_tables": False,
+                    "processing_method": "doc2txt",
+                },
+            }
+        except ImportError:
+            logger.warning("doc2txt not available for .DOC files")
+            raise ValueError(
+                "Legacy .DOC format requires doc2txt package. "
+                "Install with: pip install doc2txt"
+            )
+        except Exception as e:
+            logger.error(f"doc2txt .DOC processing failed: {e}", exc_info=True)
+            raise ValueError(f"Could not process .DOC file: {e}")
 
     async def _process_docx(self, file_path: Path) -> Dict[str, Any]:
         """Process DOCX using Docling."""

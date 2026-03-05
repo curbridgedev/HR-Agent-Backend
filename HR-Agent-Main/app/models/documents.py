@@ -103,10 +103,12 @@ class DocumentListItem(BaseResponse):
     """Document list item for browsing."""
 
     id: str = Field(..., description="Document UUID")
-    title: str = Field(..., description="Document title")
+    title: str = Field(..., description="Document title / filename")
     source: str = Field(..., description="Document source")
     processing_status: str = Field(..., description="Current processing status")
     created_at: datetime = Field(..., description="Upload timestamp")
+    province: Optional[str] = Field(None, description="Province context (MB, ON, SK, AB, BC, ALL)")
+    original_filename: Optional[str] = Field(None, description="Original uploaded filename")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Document metadata")
 
 

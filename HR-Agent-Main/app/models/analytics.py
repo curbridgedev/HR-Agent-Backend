@@ -34,6 +34,13 @@ class SessionBreakdown(BaseResponse):
     unique_users: Optional[int] = Field(None, description="Number of unique users (if available)")
 
 
+class ProvinceBreakdown(BaseResponse):
+    """Session count by province."""
+
+    province: str = Field(..., description="Province code (MB, ON, SK, AB, BC, ALL, etc.)")
+    session_count: int = Field(..., description="Number of sessions for this province")
+
+
 class SessionsAnalyticsResponse(BaseResponse):
     """Response model for session count aggregation."""
 
@@ -44,6 +51,9 @@ class SessionsAnalyticsResponse(BaseResponse):
     date_range: DateRange = Field(..., description="Date range for this analysis")
     breakdown: List[SessionBreakdown] = Field(
         ..., description="Session count breakdown by date"
+    )
+    by_province: Optional[List[ProvinceBreakdown]] = Field(
+        None, description="Session count breakdown by province (includes ALL)"
     )
 
     model_config = ConfigDict(from_attributes=True)

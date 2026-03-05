@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from app.models.chat import ChatRequest, ChatResponse, ChatStreamChunk, SessionsListResponse
 from app.services.chat import process_chat, process_chat_stream, get_chat_history, get_sessions_list, clear_chat_session
 from app.core.logging import get_logger
-from app.core.dependencies import get_current_user_id
+from app.core.dependencies import get_current_user_id, get_optional_user_id
 
 logger = get_logger(__name__)
 
@@ -15,7 +15,10 @@ router = APIRouter()
 
 
 @router.post("/", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(
+    request: ChatRequest,
+    current_user_id: str | None = Depends(get_optional_user_id),
+) -> ChatResponse:
     """
     Process a chat message and return the agent's response.
 
@@ -31,7 +34,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
         HTTPException: If processing fails
     """
     try:
-        response = await process_chat(request)
+        effective_user_id = request.user_id or current_user_id
+        response = await process_chat(request, user_id_override=effective_user_id)
         return response
     except Exception as e:
         logger.error(f"Chat endpoint error: {e}", exc_info=True)
@@ -39,7 +43,10 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 
 @router.post("/stream")
-async def chat_stream(request: ChatRequest) -> StreamingResponse:
+async def chat_stream(
+    request: ChatRequest,
+    current_user_id: str | None = Depends(get_optional_user_id),
+) -> StreamingResponse:
     """
     Process a chat message with streaming response.
 
@@ -52,10 +59,13 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         StreamingResponse with SSE events
     """
     try:
+        # Use authenticated user from token when request.user_id is missing (ensures sidebar shows session)
+        effective_user_id = request.user_id or current_user_id
+
         async def event_generator():
             """Generate SSE events from chat stream."""
             try:
-                async for chunk in process_chat_stream(request):
+                async for chunk in process_chat_stream(request, user_id_override=effective_user_id):
                     # Format as SSE
                     yield f"data: {chunk.model_dump_json()}\n\n"
             except Exception as e:
