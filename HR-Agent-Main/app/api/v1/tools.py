@@ -3,7 +3,7 @@ API endpoints for tool management.
 """
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.models.tools import (
     ToolListResponse,
@@ -13,11 +13,12 @@ from app.models.tools import (
 )
 from app.models.base import BaseResponse
 from app.services.tool_management import get_tool_service
+from app.core.dependencies import get_current_user_id
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_id)])
 
 
 @router.get("/", response_model=ToolListResponse)

@@ -4,15 +4,16 @@ Agent graph visualization API endpoints.
 Provides endpoints to visualize the LangGraph agent workflow.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, JSONResponse
 from typing import Literal
 from app.agents.graph import get_agent_graph
+from app.core.dependencies import get_current_user_id
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_id)])
 
 
 @router.get(

@@ -64,9 +64,9 @@ async def analyze_query_node(state: AgentState) -> dict[str, Any]:
             model = model_settings.model
             logger.debug(f"Using model from config: provider={provider}, model={model}")
         else:
-            # Fallback to gpt-4-turbo for better JSON support
+            # Fallback to gpt-5 (latest flagship model)
             provider = "openai"
-            model = "gpt-4-turbo"
+            model = "gpt-5"
             logger.warning(f"Using fallback model: provider={provider}, model={model}")
 
         # Prepare variables for prompt template
@@ -403,17 +403,18 @@ async def retrieve_context_node(state: AgentState) -> dict[str, Any]:
         # Generate embedding for query
         query_embedding = await generate_embedding(state["query"])
 
-        # Perform hybrid search with province filter
+        # Perform hybrid search with province and project filters
         db = get_supabase_client()
         province = state.get("province")  # Get province from state
+        project_id = state.get("project_id")  # Get project_id for project-based RAG
         # When "ALL" or empty, search across all provinces (no filter)
         province_for_search = None if (not province or province == "ALL") else province
         
         if not province:
-            logger.warning(f"⚠️ No province in state for query: {state['query'][:50]}...")
+            logger.warning(f"[!] No province in state for query: {state['query'][:50]}...")
             logger.warning(f"   State keys: {list(state.keys())}")
         
-        logger.info(f"🔍 Retrieving context with province filter: {province_for_search or 'ALL (no filter)'}")
+        logger.info(f"[RAG] Retrieving context with province filter: {province_for_search or 'ALL (no filter)'}, project_id: {project_id or 'none'}")
         
         documents = await hybrid_search(
             db=db,
@@ -422,18 +423,19 @@ async def retrieve_context_node(state: AgentState) -> dict[str, Any]:
             match_threshold=final_threshold,
             match_count=final_max_results,
             province=province_for_search,  # None = all provinces, specific code = filter
+            project_id=project_id,  # When set: project docs + global KB
         )
         
         if province_for_search:
-            logger.info(f"✅ Province filter '{province_for_search}' applied: {len(documents)} results")
+            logger.info(f"[OK] Province filter '{province_for_search}' applied: {len(documents)} results")
             # Check if any documents have wrong province
             for doc in documents[:3]:  # Check first 3
                 doc_title = doc.get("document_title") or doc.get("title", "unknown")
                 logger.debug(f"   Document: {doc_title[:50]}...")
         else:
-            logger.info(f"✅ No province filter - returned {len(documents)} results from all provinces")
+            logger.info(f"[OK] No province filter - returned {len(documents)} results from all provinces")
 
-        # Format context text
+        # Format context text (RAG results)
         context_text = ""
         if documents:
             context_text = "\n\n".join(
@@ -442,6 +444,12 @@ async def retrieve_context_node(state: AgentState) -> dict[str, Any]:
                     for doc in documents
                 ]
             )
+
+        # Prepend attachment content when user uploaded files (PDF, docx, etc.)
+        attachment_context = state.get("attachment_context") or ""
+        if attachment_context:
+            context_text = f"{attachment_context}\n\n{context_text}" if context_text else attachment_context
+            logger.info(f"Included attachment context ({len(attachment_context)} chars)")
 
         logger.info(f"Retrieved {len(documents)} context documents")
 
@@ -498,50 +506,48 @@ async def generate_response_node(state: AgentState) -> dict[str, Any]:
             model = settings.openai_model
             logger.warning("Using fallback model settings (config not available)")
 
-        # Load system prompt from database
-        system_prompt_obj = await get_active_prompt(
-            name="main_system_prompt",
-            prompt_type="system",
-        )
+        # User override: apply model_override from user settings if present
+        user_settings = state.get("user_settings") or {}
+        if user_settings.get("model_override"):
+            model = user_settings["model_override"]
+            logger.info(f"Using user model override: {model}")
 
-        if system_prompt_obj:
-            system_prompt = system_prompt_obj.content
-            # Add province context if available
-            province = state.get("province")
-            province_names = {
-                "AB": "Alberta", "BC": "British Columbia", "MB": "Manitoba",
-                "NB": "New Brunswick", "NL": "Newfoundland and Labrador",
-                "NS": "Nova Scotia", "ON": "Ontario", "PE": "Prince Edward Island",
-                "QC": "Quebec", "SK": "Saskatchewan",
-            }
+        # Load system prompt: user override, database, or fallback
+        province = state.get("province")
+        province_names = {
+            "AB": "Alberta", "BC": "British Columbia", "MB": "Manitoba",
+            "NB": "New Brunswick", "NL": "Newfoundland and Labrador",
+            "NS": "Nova Scotia", "ON": "Ontario", "PE": "Prince Edward Island",
+            "QC": "Quebec", "SK": "Saskatchewan",
+        }
+
+        def _add_province_context(base: str) -> str:
             if province and province != "ALL":
-                province_name = province_names.get(province, province)
-                province_context = f"\n\nIMPORTANT: You are answering questions about {province_name} ({province}) employment standards. Only reference laws and regulations that apply to {province_name}. Do not mix information from other provinces."
-                system_prompt = system_prompt + province_context
+                pn = province_names.get(province, province)
+                return base + f"\n\nIMPORTANT: You are answering questions about {pn} ({province}) employment standards. Only reference laws and regulations that apply to {pn}. Do not mix information from other provinces."
             elif province == "ALL":
-                province_context = "\n\nIMPORTANT: You are answering questions about employment standards across all Canadian provinces. When relevant, specify which province each regulation or policy applies to. The context may include documents from multiple provinces."
-                system_prompt = system_prompt + province_context
-            logger.debug(
-                f"Using database system prompt: v{system_prompt_obj.version}, province={province}"
-            )
+                return base + "\n\nIMPORTANT: You are answering questions about employment standards across all Canadian provinces. When relevant, specify which province each regulation or policy applies to. The context may include documents from multiple provinces."
+            return base
+
+        system_prompt_override = user_settings.get("system_prompt_override")
+        if system_prompt_override:
+            system_prompt = _add_province_context(system_prompt_override)
+            logger.info("Using user system prompt override")
         else:
-            # Fallback to hardcoded prompt if database fails
-            # Include province context if available
-            province = state.get("province", "Canada")
-            province_context = ""
-            province_names = {
-                "AB": "Alberta", "BC": "British Columbia", "MB": "Manitoba",
-                "NB": "New Brunswick", "NL": "Newfoundland and Labrador",
-                "NS": "Nova Scotia", "ON": "Ontario", "PE": "Prince Edward Island",
-                "QC": "Quebec", "SK": "Saskatchewan",
-            }
-            if province and province != "ALL":
-                province_name = province_names.get(province, province)
-                province_context = f"\n\nIMPORTANT: You are answering questions about {province_name} ({province}) employment standards. Only reference laws and regulations that apply to {province_name}. Do not mix information from other provinces."
-            elif province == "ALL":
-                province_context = "\n\nIMPORTANT: You are answering questions about employment standards across all Canadian provinces. When relevant, specify which province each regulation or policy applies to. The context may include documents from multiple provinces."
-            
-            system_prompt = f"""You are a Canadian Employment Standards HR Assistant specializing in provincial employment law.
+            system_prompt_obj = await get_active_prompt(
+                name="main_system_prompt",
+                prompt_type="system",
+            )
+            if system_prompt_obj:
+                system_prompt = _add_province_context(system_prompt_obj.content)
+                logger.debug(f"Using database system prompt: v{system_prompt_obj.version}, province={province}")
+            else:
+                province_context = ""
+                if province and province != "ALL":
+                    province_context = f"\n\nIMPORTANT: You are answering questions about {province_names.get(province, province)} ({province}) employment standards."
+                elif province == "ALL":
+                    province_context = "\n\nIMPORTANT: You are answering questions about employment standards across all Canadian provinces."
+                system_prompt = f"""You are a Canadian Employment Standards HR Assistant specializing in provincial employment law.
 Your role is to answer questions accurately based on the provided context from official employment standards documents.
 
 {province_context}
@@ -551,7 +557,7 @@ If the context is insufficient, clearly state what information is missing.
 
 Always be professional, accurate, and cite specific sections or sources when possible.
 Never provide legal advice - only informational guidance based on the documents provided."""
-            logger.warning("Using fallback system prompt (database not available)")
+                logger.warning("Using fallback system prompt (database not available)")
 
         # Format conversation history for context
         conversation_context = ""
@@ -731,17 +737,27 @@ async def _calculate_formula_confidence(
             # Single document
             similarity_score = similarities[0]
 
+        # NORMALIZE vector-only scores: Hybrid search caps at ~0.6 when the full query
+        # doesn't match document text (e.g. "What is DEIB..." won't ILIKE match content).
+        # Good semantic matches get 0.4-0.6 raw. Scale to reflect true relevance.
+        raw_similarity = similarity_score
+        if similarity_score < 0.7 and similarity_score >= 0.3:
+            similarity_score = min(1.0, similarity_score / 0.50)
+            logger.debug(f"Normalized vector-only similarity: {raw_similarity:.2f} -> {similarity_score:.2f}")
+
         # SOURCE QUALITY BOOST: Count of high-quality sources
+        # Use 0.4 to recognize vector-only matches (hybrid caps at ~0.6 without keyword match)
+        high_quality_threshold = 0.4
         high_quality_sources = [
-            doc for doc in context_docs if doc.get("similarity", 0) > 0.75
+            doc for doc in context_docs if doc.get("similarity", 0) > high_quality_threshold
         ]
 
         if len(high_quality_sources) >= 3:
             source_boost = 1.0
         elif len(high_quality_sources) == 2:
-            source_boost = 0.6
+            source_boost = 0.7  # Increased from 0.6
         elif len(high_quality_sources) == 1:
-            source_boost = 0.3
+            source_boost = 0.5  # Increased from 0.3
         else:
             source_boost = 0.0
 
@@ -753,11 +769,21 @@ async def _calculate_formula_confidence(
         else:
             length_boost = 0.0
 
+        # CONTEXT-FOUND BONUS: Reward successful retrieval of relevant context
+        # When we have good matches (similarity >= 0.6), add a boost to help reach
+        # resolve threshold (0.95) when documents are good but formula was strict
+        context_bonus = 0.0
+        if similarity_score >= 0.6:
+            context_bonus = 0.12  # +12% for having reasonably relevant context
+        elif similarity_score >= 0.5:
+            context_bonus = 0.06  # +6% for marginal relevance
+
         # FINAL CONFIDENCE CALCULATION
         confidence = (
             similarity_score * similarity_weight +
             source_boost * source_quality_weight +
-            length_boost * response_length_weight
+            length_boost * response_length_weight +
+            context_bonus
         )
 
         # Cap at 1.0
@@ -767,7 +793,8 @@ async def _calculate_formula_confidence(
             f"Formula confidence: {confidence:.3f} "
             f"(similarity={similarity_score:.3f}@{similarity_weight*100:.0f}%, "
             f"sources={source_boost:.1f}@{source_quality_weight*100:.0f}%, "
-            f"length={length_boost:.1f}@{response_length_weight*100:.0f}%)"
+            f"length={length_boost:.1f}@{response_length_weight*100:.0f}%, "
+            f"context_bonus={context_bonus:.2f})"
         )
 
         return {
@@ -777,6 +804,7 @@ async def _calculate_formula_confidence(
                 "similarity_score": float(similarity_score),
                 "source_boost": float(source_boost),
                 "length_boost": float(length_boost),
+                "context_bonus": float(context_bonus),
                 "high_quality_source_count": len(high_quality_sources),
                 "response_length": response_length,
                 "weights": {

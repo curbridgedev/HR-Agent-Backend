@@ -131,6 +131,25 @@ class ConfidenceScoresResponse(BaseResponse):
 
 
 # ============================================================================
+# Citation Rate Models
+# ============================================================================
+
+class CitationRateResponse(BaseResponse):
+    """Response model for citation rate analysis."""
+
+    citation_rate: float = Field(
+        ..., description="Percentage of responses with at least one source (0-100)"
+    )
+    total_messages: int = Field(..., description="Total assistant messages analyzed")
+    messages_with_sources: int = Field(
+        ..., description="Messages with sources_count > 0 in metadata"
+    )
+    date_range: DateRange = Field(..., description="Date range for this analysis")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ============================================================================
 # Top Questions Models
 # ============================================================================
 

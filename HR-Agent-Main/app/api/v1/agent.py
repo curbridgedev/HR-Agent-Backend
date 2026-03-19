@@ -8,8 +8,9 @@ Provides endpoints for:
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.core.dependencies import get_current_user_id
 from app.core.logging import get_logger
 from app.models.admin import (
     SystemPromptCreateRequest,
@@ -33,7 +34,7 @@ from app.services.agent_config import (
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_id)])
 
 
 # ============================================================================

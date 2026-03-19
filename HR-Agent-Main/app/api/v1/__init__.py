@@ -10,13 +10,16 @@ from app.api.v1 import (
     agent,
     agent_graph,
     analytics,
+    auth,
     chat,
     customers,
     documents,
     escalate,
     mcp_servers,
     models,
+    projects,
     prompts,
+    settings,
     tools,
     upload,
     users,
@@ -25,11 +28,20 @@ from app.api.v1 import (
 
 api_router = APIRouter()
 
+# Register auth endpoints (public - no auth required)
+api_router.include_router(auth.router, prefix="/auth", tags=["Auth"])
+
 # Register chat endpoints
 api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
 
 # Register document management endpoints
 api_router.include_router(documents.router, prefix="/documents", tags=["Documents"])
+
+# Register projects endpoints (project-based chats)
+api_router.include_router(projects.router, prefix="/projects", tags=["Projects"])
+
+# Register user settings endpoints (API keys, model/prompt overrides)
+api_router.include_router(settings.router, prefix="/settings", tags=["Settings"])
 
 # Register models/providers endpoints
 api_router.include_router(models.router, prefix="/models", tags=["Models"])

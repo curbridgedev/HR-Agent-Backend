@@ -1,6 +1,6 @@
 # Slack Integration Setup Guide
 
-Complete guide for setting up the Compaytence AI Agent Slack integration.
+Complete guide for setting up the Curbridge HR-Agent Slack integration.
 
 ## Features
 

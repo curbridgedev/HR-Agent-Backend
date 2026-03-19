@@ -44,6 +44,7 @@ class DocumentIngestionService:
         source: str = "admin_upload",
         province: str | None = None,
         metadata: dict[str, Any] | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Ingest a document through the complete pipeline.
@@ -55,6 +56,7 @@ class DocumentIngestionService:
             source: Source of the document
             province: Canadian province code (MB, ON, SK, AB, BC, or ALL for federal/multi-province)
             metadata: Additional metadata
+            project_id: Optional project UUID for project-scoped documents
 
         Returns:
             Dictionary with ingestion results:
@@ -193,6 +195,10 @@ class DocumentIngestionService:
                 # Default to 'ALL' if no province specified (for backward compatibility)
                 doc_record["province"] = "ALL"
                 logger.debug(f"[{document_id}] No province specified, defaulting to 'ALL'")
+
+            if project_id:
+                doc_record["project_id"] = project_id
+                logger.info(f"[{document_id}] Document tagged with project: {project_id}")
 
             try:
                 self.db.table("documents").insert(doc_record).execute()

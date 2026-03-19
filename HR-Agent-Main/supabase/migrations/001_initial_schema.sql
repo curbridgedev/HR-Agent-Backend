@@ -1,4 +1,4 @@
--- Compaytence AI Agent - Initial Database Schema
+-- Curbridge HR-Agent - Initial Database Schema
 -- This migration sets up the core database structure for the RAG system
 
 -- Enable pgvector extension for vector similarity search

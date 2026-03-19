@@ -6,15 +6,16 @@ with caching and dynamic discovery.
 """
 
 from typing import List, Dict, Any
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException
 
 from app.models.base import BaseResponse
 from app.utils.llm_client import get_available_models, clear_model_cache
+from app.core.dependencies import get_current_user_id
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_id)])
 
 
 class AvailableModelsResponse(BaseResponse):

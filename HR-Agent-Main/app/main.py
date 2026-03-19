@@ -115,44 +115,103 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 # Create FastAPI application
 app = FastAPI(
-    title="HR Agent - Canadian Employment Standards Assistant",
+    title="Rita AI - Canadian Employment Standards API",
     version=settings.app_version,
-    description="Canadian Employment Standards HR Agent - AI-powered Q&A assistant for provincial employment law and HR policies with RAG capabilities",
+    description="Rita AI (Run it By Rita) - AI-powered Q&A for Canadian provincial employment law and HR policies with RAG capabilities",
     docs_url="/docs" if settings.enable_api_docs else None,
     redoc_url="/redoc" if settings.enable_api_docs else None,
     openapi_url=f"{settings.api_v1_prefix}/openapi.json" if settings.enable_api_docs else None,
+    swagger_ui_parameters={"persistAuthorization": True},
     lifespan=lifespan,
     contact={
-        "name": "Curbridge HR Agent",
+        "name": "Curbridge",
         "url": "https://curbridge.com",
     },
     license_info={
         "name": "Proprietary",
     },
-    # OpenAPI metadata
+    # OpenAPI tags - order and descriptions for common endpoints (Upload excluded)
     openapi_tags=[
-        {
-            "name": "Chat",
-            "description": "Chat endpoints for interacting with the HR Agent",
-        },
-        {
-            "name": "Documents",
-            "description": "Document upload and management endpoints",
-        },
-        {
-            "name": "Health",
-            "description": "Health check and monitoring endpoints",
-        },
+        {"name": "Auth", "description": "OAuth token endpoint for programmatic API access"},
+        {"name": "Chat", "description": "Chat streaming, history, and sessions"},
+        {"name": "Documents", "description": "Knowledge base document management"},
+        {"name": "Projects", "description": "Project-based chat organization"},
+        {"name": "Settings", "description": "User settings and API keys"},
+        {"name": "Models", "description": "LLM provider and model selection"},
+        {"name": "Prompts", "description": "System prompt management"},
+        {"name": "Escalations", "description": "Escalate to human HR specialists"},
+        {"name": "Tools", "description": "Agent tool configuration"},
+        {"name": "MCP Servers", "description": "Model Context Protocol servers"},
+        {"name": "Agent Configuration", "description": "Agent config and system prompts"},
+        {"name": "Analytics", "description": "Session and confidence analytics"},
+        {"name": "User Management", "description": "Admin user management"},
+        {"name": "Agent Graph", "description": "Agent graph visualization"},
+        {"name": "Admin", "description": "Admin LLM models and pricing"},
+        {"name": "Health", "description": "Health check endpoints"},
+        {"name": "Root", "description": "Root and ping endpoints"},
     ],
 )
 
-# Add middleware
+# Custom OpenAPI schema for Try it out: servers URL + auth (Bearer + X-API-Key)
+def _custom_openapi():
+    from fastapi.openapi.utils import get_openapi
+
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+        tags=app.openapi_tags,
+    )
+
+    # Server URL for Try it out (production)
+    openapi_schema["servers"] = [
+        {"url": settings.api_docs_server_url.rstrip("/"), "description": "Production"},
+    ]
+
+    # Security schemes: Bearer (from /auth/token) or X-API-Key (from Settings)
+    openapi_schema["components"] = openapi_schema.get("components", {})
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "JWT from POST /api/v1/auth/token (email/password). Use for session-based access.",
+        },
+        "ApiKeyAuth": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-API-Key",
+            "description": "Personal API key from Settings > API Keys. Use for programmatic access.",
+        },
+    }
+
+    # Apply security to all paths except public ones (OR: Bearer OR ApiKey)
+    public_paths = {"/", "/health", f"{settings.api_v1_prefix}/ping", f"{settings.api_v1_prefix}/auth/token"}
+    for path, path_item in openapi_schema.get("paths", {}).items():
+        if path in public_paths:
+            continue
+        for method, operation in path_item.items():
+            if method in ("get", "post", "put", "patch", "delete") and isinstance(operation, dict):
+                operation["security"] = [{"BearerAuth": []}, {"ApiKeyAuth": []}]
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = _custom_openapi
+
+# Add middleware - CORS must allow frontend origin for preflight (OPTIONS) to succeed
+# When allow_credentials=True, cannot use "*" for headers - must list explicitly
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_credentials=settings.cors_credentials,
     allow_methods=settings.cors_methods_list,
-    allow_headers=[settings.cors_headers],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With", "X-API-Key"],
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -187,7 +246,7 @@ async def root() -> JSONResponse:
         content={
             "service": settings.app_name,
             "version": settings.app_version,
-            "docs": f"{settings.api_v1_prefix}/docs" if settings.enable_api_docs else None,
+            "docs": "/docs" if settings.enable_api_docs else None,
         }
     )
 

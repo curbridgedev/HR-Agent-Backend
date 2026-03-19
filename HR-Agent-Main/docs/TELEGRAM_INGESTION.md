@@ -1,6 +1,6 @@
 # Telegram Integration Guide
 
-This guide covers the Telegram integration implementation for the Compaytence AI Agent, which uses **Telethon** (MTProto API) for both historical data ingestion and real-time message sync.
+This guide covers the Telegram integration implementation for the Curbridge HR-Agent, which uses **Telethon** (MTProto API) for both historical data ingestion and real-time message sync.
 
 ## Table of Contents
 
@@ -69,7 +69,7 @@ This guide covers the Telegram integration implementation for the Compaytence AI
 2. Log in with your phone number
 3. Go to "API development tools"
 4. Create a new application:
-   - App title: `Compaytence AI Agent`
+   - App title: `Curbridge HR-Agent`
    - Short name: `compaytence`
    - Platform: `Other`
 5. Copy your `API ID` and `API Hash`

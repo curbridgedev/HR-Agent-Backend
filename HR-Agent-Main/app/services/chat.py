@@ -40,12 +40,12 @@ async def process_chat(request: ChatRequest, user_id_override: str | None = None
     try:
         logger.info(f"Processing chat request: session_id={request.session_id}, user_id={effective_user_id}")
 
-        # Get province from session (locked in) or use request province for new sessions
+        # Get province and project_id from session (locked in) or use request for new sessions
         from app.db.supabase import get_supabase_client
         supabase = get_supabase_client()
         session_response = (
             supabase.table("chat_sessions")
-            .select("province, message_count")
+            .select("province, message_count, project_id")
             .eq("session_id", request.session_id)
             .execute()
         )
@@ -53,14 +53,18 @@ async def process_chat(request: ChatRequest, user_id_override: str | None = None
         # Use session province if session exists and has messages (and not "ALL"), otherwise use request province
         session_province = session_response.data[0].get("province") if session_response.data else None
         message_count = session_response.data[0].get("message_count", 0) if session_response.data else 0
+        session_project_id = session_response.data[0].get("project_id") if session_response.data else None
         if session_response.data and message_count > 0 and session_province and session_province != "ALL":
             # Session has messages and specific province - use locked province
             province = session_province
             logger.debug(f"Using locked province from session: {province}")
         else:
             # New session, or "ALL" selected (allows switching), or no session - use request province
-            province = request.province or "MB"
+            province = request.province or "ALL"
             logger.info(f"Using province from request: {province!r}")
+
+        # Project: use session's project_id if set, otherwise request.project_id
+        project_id = session_project_id or request.project_id
 
         # Import agent graph
         from app.agents.graph import get_agent_graph
@@ -68,13 +72,27 @@ async def process_chat(request: ChatRequest, user_id_override: str | None = None
         # Retrieve conversation history for context
         conversation_history = await get_conversation_history_for_agent(request.session_id)
 
+        # Fetch user settings for overrides (model, system prompt)
+        user_settings = None
+        if effective_user_id:
+            from app.services.user_settings import get_user_settings_for_user
+            settings_obj = await get_user_settings_for_user(effective_user_id)
+            if settings_obj and (settings_obj.model_override or settings_obj.system_prompt_override):
+                user_settings = {
+                    "model_override": settings_obj.model_override,
+                    "system_prompt_override": settings_obj.system_prompt_override,
+                }
+
         # Prepare initial state
         initial_state = {
             "query": request.message,
             "session_id": request.session_id,
             "user_id": request.user_id,
             "province": province,  # Use session province (locked) or request province (new)
+            "project_id": project_id,  # For project-based RAG (project docs + global KB)
             "conversation_history": conversation_history,
+            "user_settings": user_settings,
+            "attachment_context": "",  # No attachments for non-multipart requests
             "context_documents": [],
             "context_text": "",
             "confidence_score": 0.0,
@@ -169,6 +187,7 @@ async def process_chat(request: ChatRequest, user_id_override: str | None = None
             content=request.message,
             user_id=effective_user_id,
             province=province,  # Use the province we determined (session or request)
+            project_id=project_id,
             metadata={"platform": "api"},
         )
 
@@ -180,6 +199,7 @@ async def process_chat(request: ChatRequest, user_id_override: str | None = None
             escalated=response.escalated,
             user_id=effective_user_id,
             province=province,  # Use the province we determined (session or request)
+            project_id=project_id,
             metadata={
                 "tokens_used": response.tokens_used,
                 "response_time_ms": response.response_time_ms,
@@ -207,7 +227,10 @@ async def process_chat(request: ChatRequest, user_id_override: str | None = None
 
 
 async def process_chat_stream(
-    request: ChatRequest, user_id_override: str | None = None
+    request: ChatRequest,
+    user_id_override: str | None = None,
+    user_message_already_saved: bool = False,
+    attachment_message_id: str | None = None,
 ) -> AsyncGenerator[ChatStreamChunk, None]:
     """
     Process a chat request with streaming response.
@@ -218,6 +241,8 @@ async def process_chat_stream(
     Args:
         request: Chat request with message and context
         user_id_override: User ID from auth token when request.user_id is missing (ensures sidebar shows session)
+        user_message_already_saved: If True, skip saving user message (used when multipart upload saved it first)
+        attachment_message_id: If set, fetch attachments for this message and pass extracted text to agent
 
     Yields:
         Chat stream chunks with partial responses
@@ -230,12 +255,12 @@ async def process_chat_stream(
             f"user_id={effective_user_id}, request.province={request.province!r}"
         )
 
-        # Get province from session (locked in) or use request province for new sessions
+        # Get province and project_id from session (locked in) or use request for new sessions
         from app.db.supabase import get_supabase_client
         supabase = get_supabase_client()
         session_response = (
             supabase.table("chat_sessions")
-            .select("province, message_count")
+            .select("province, message_count, project_id")
             .eq("session_id", request.session_id)
             .execute()
         )
@@ -243,14 +268,18 @@ async def process_chat_stream(
         # Use session province if session exists and has messages (and not "ALL"), otherwise use request province
         session_province = session_response.data[0].get("province") if session_response.data else None
         message_count = session_response.data[0].get("message_count", 0) if session_response.data else 0
+        session_project_id = session_response.data[0].get("project_id") if session_response.data else None
         if session_response.data and message_count > 0 and session_province and session_province != "ALL":
             # Session has messages and specific province - use locked province
             province = session_province
             logger.debug(f"Using locked province from session: {province}")
         else:
             # New session, or "ALL" selected (allows switching), or no session - use request province
-            province = request.province or "MB"
+            province = request.province or "ALL"
             logger.info(f"Using province from request: {province!r}")
+
+        # Project: use session's project_id if set, otherwise request.project_id
+        project_id = session_project_id or request.project_id
 
         # Import agent graph
         from app.agents.graph import get_agent_graph
@@ -258,13 +287,35 @@ async def process_chat_stream(
         # Retrieve conversation history for context
         conversation_history = await get_conversation_history_for_agent(request.session_id)
 
+        # Fetch attachment content when user uploaded files (for "tell me about this file" queries)
+        attachment_context = ""
+        if attachment_message_id:
+            from app.services.chat_attachments import get_attachment_context_for_message
+            attachment_context = await get_attachment_context_for_message(attachment_message_id)
+            if attachment_context:
+                logger.info(f"Loaded attachment context for message {attachment_message_id} ({len(attachment_context)} chars)")
+
+        # Fetch user settings for overrides (model, system prompt)
+        user_settings = None
+        if effective_user_id:
+            from app.services.user_settings import get_user_settings_for_user
+            settings_obj = await get_user_settings_for_user(effective_user_id)
+            if settings_obj and (settings_obj.model_override or settings_obj.system_prompt_override):
+                user_settings = {
+                    "model_override": settings_obj.model_override,
+                    "system_prompt_override": settings_obj.system_prompt_override,
+                }
+
         # Prepare initial state
         initial_state = {
             "query": request.message,
             "session_id": request.session_id,
             "user_id": request.user_id,
             "province": province,  # Use session province (locked) or request province (new)
+            "project_id": project_id,  # For project-based RAG (project docs + global KB)
             "conversation_history": conversation_history,
+            "user_settings": user_settings,
+            "attachment_context": attachment_context,  # Extracted text from uploaded files
             "context_documents": [],
             "context_text": "",
             "confidence_score": 0.0,
@@ -353,14 +404,16 @@ async def process_chat_stream(
             ]
 
             # Save to database BEFORE yielding final chunk so sidebar refetch sees the session
-            await save_chat_message(
-                session_id=request.session_id,
-                role="user",
-                content=request.message,
-                user_id=effective_user_id,
-                province=province,  # Use the province we determined (session or request)
-                metadata={"platform": "api", "streaming": True},
-            )
+            if not user_message_already_saved:
+                await save_chat_message(
+                    session_id=request.session_id,
+                    role="user",
+                    content=request.message,
+                    user_id=effective_user_id,
+                    province=province,  # Use the province we determined (session or request)
+                    project_id=project_id,
+                    metadata={"platform": "api", "streaming": True},
+                )
 
             await save_chat_message(
                 session_id=request.session_id,
@@ -370,6 +423,7 @@ async def process_chat_stream(
                 escalated=final_state.get("escalated", False),
                 user_id=effective_user_id,
                 province=province,  # Use the province we determined (session or request)
+                project_id=project_id,
                 metadata={
                     "tokens_used": final_state.get("tokens_used", 0),
                     "sources_count": len(sources),
@@ -426,10 +480,10 @@ def _province_from_db(province) -> str:
     """Convert province from database (NULL -> 'ALL') for API response."""
     if province is None:
         return "ALL"
-    return province or "MB"
+    return province or "ALL"
 
 
-async def ensure_chat_session(session_id: str, user_id: str = None, province: str = "MB") -> bool:
+async def ensure_chat_session(session_id: str, user_id: str = None, province: str = "ALL", project_id: str = None) -> bool:
     """
     Ensure a chat session exists in the database.
     Creates the session if it doesn't exist.
@@ -438,6 +492,7 @@ async def ensure_chat_session(session_id: str, user_id: str = None, province: st
         session_id: Session identifier
         user_id: Optional user identifier
         province: Canadian province context (MB, ON, SK, AB, BC, or ALL)
+        project_id: Optional project UUID for project-based chats
 
     Returns:
         True if session exists or was created successfully
@@ -463,7 +518,7 @@ async def ensure_chat_session(session_id: str, user_id: str = None, province: st
 
             # Update province if: new session (no messages), or "ALL" (None) allows switching
             if province and (message_count == 0 or existing_province is None):
-                province_update = None if province == "ALL" else (province or "MB")
+                province_update = None if province == "ALL" else (province or "ALL")
                 update_response = (
                     supabase.table("chat_sessions")
                     .update({"province": province_update})
@@ -483,7 +538,7 @@ async def ensure_chat_session(session_id: str, user_id: str = None, province: st
         # Create new session
         # Note: 'active' is a generated column (computed from 'is_active')
         # Use NULL for "ALL" - works with migration 018 (allows NULL, not "ALL" until 029)
-        province_storage = None if province == "ALL" else (province or "MB")
+        province_storage = None if province == "ALL" else (province or "ALL")
         session_data = {
             "session_id": session_id,
             "user_id": user_id,
@@ -491,6 +546,8 @@ async def ensure_chat_session(session_id: str, user_id: str = None, province: st
             "metadata": {},
             "province": province_storage,
         }
+        if project_id:
+            session_data["project_id"] = project_id
 
         logger.debug(f"Attempting to create session with data: {session_data}")
         create_response = supabase.table("chat_sessions").insert(session_data).execute()
@@ -608,8 +665,9 @@ async def save_chat_message(
     escalated: bool = False,
     metadata: dict = None,
     user_id: str = None,
-    province: str = "MB",
-) -> bool:
+    province: str = "ALL",
+    project_id: str = None,
+) -> str | bool:
     """
     Save a chat message to the database.
 
@@ -622,9 +680,10 @@ async def save_chat_message(
         metadata: Additional metadata
         user_id: Optional user identifier for session creation
         province: Canadian province context (MB, ON, SK, AB, BC)
+        project_id: Optional project UUID for project-based chats
 
     Returns:
-        True if saved successfully
+        Message UUID (str) if saved successfully, False otherwise
     """
     try:
         from app.db.supabase import get_supabase_client
@@ -632,13 +691,13 @@ async def save_chat_message(
         supabase = get_supabase_client()
 
         # Ensure session exists first (to satisfy foreign key constraint)
-        session_created = await ensure_chat_session(session_id, user_id, province)
+        session_created = await ensure_chat_session(session_id, user_id, province, project_id)
         if not session_created:
             logger.error(f"Failed to ensure chat session exists: {session_id}")
             raise ValueError(f"Chat session {session_id} could not be created or found")
 
         # Prepare message data - use NULL for "ALL" (migration 018 allows NULL)
-        province_storage = None if province == "ALL" else (province or "MB")
+        province_storage = None if province == "ALL" else (province or "ALL")
         message_data = {
             "session_id": session_id,
             "role": role,
@@ -653,8 +712,9 @@ async def save_chat_message(
         response = supabase.table("chat_messages").insert(message_data).execute()
 
         if response.data:
-            logger.debug(f"Saved chat message: session={session_id}, role={role}, province={province}")
-            return True
+            msg_id = response.data[0].get("id")
+            logger.debug(f"Saved chat message: session={session_id}, role={role}, id={msg_id}")
+            return str(msg_id) if msg_id else True
         else:
             logger.warning(f"Failed to save chat message: {response}")
             return False
@@ -697,18 +757,27 @@ async def get_chat_history(session_id: str, limit: int = 50) -> list:
             logger.info(f"No chat history found for session: {session_id}")
             return []
 
-        # Format messages
-        messages = [
-            {
+        # Fetch attachments for user messages
+        from app.services.chat_attachments import get_attachments_for_messages
+
+        user_msg_ids = [msg["id"] for msg in response.data if msg["role"] == "user"]
+        attachments_by_msg = await get_attachments_for_messages([str(mid) for mid in user_msg_ids])
+
+        # Format messages with attachments
+        messages = []
+        for msg in response.data:
+            msg_id = str(msg["id"])
+            attachments = attachments_by_msg.get(msg_id, [])
+            messages.append({
+                "id": msg_id,
                 "role": msg["role"],
                 "content": msg["content"],
                 "timestamp": msg["created_at"],
                 "confidence": msg.get("confidence"),
                 "escalated": msg.get("escalated", False),
                 "metadata": msg.get("metadata", {}),
-            }
-            for msg in response.data
-        ]
+                "attachments": attachments,
+            })
 
         logger.info(f"Retrieved {len(messages)} messages for session: {session_id}")
         return messages
@@ -802,6 +871,7 @@ async def get_sessions_list(
     page: int = 1,
     page_size: int = 50,
     user_id: str = None,
+    project_id: str = None,
 ) -> dict:
     """
     Get paginated list of chat sessions with metadata.
@@ -812,12 +882,14 @@ async def get_sessions_list(
         page: Page number (1-indexed)
         page_size: Number of sessions per page (max 100)
         user_id: Optional filter by user ID
+        project_id: Optional filter by project. When provided, returns only project chats.
+            When absent and user_id provided, returns only individual chats (project_id IS NULL).
 
     Returns:
         Dictionary with sessions list and pagination info
     """
     try:
-        logger.info(f"Getting sessions list: page={page}, page_size={page_size}, user_id={user_id}")
+        logger.info(f"Getting sessions list: page={page}, page_size={page_size}, user_id={user_id}, project_id={project_id}")
 
         from app.db.supabase import get_supabase_client
         from app.models.chat import SessionSummary, SessionsListResponse
@@ -843,6 +915,12 @@ async def get_sessions_list(
         if user_id:
             query = query.eq("user_id", user_id)
 
+        # Project filter: when project_id provided, filter by it; when absent, only individual chats
+        if project_id:
+            query = query.eq("project_id", project_id)
+        elif user_id:
+            query = query.is_("project_id", "null")
+
         # Execute query with pagination
         response = query.range(offset, offset + page_size - 1).execute()
 
@@ -853,11 +931,12 @@ async def get_sessions_list(
         total_pages = math.ceil(total / page_size) if total > 0 else 1
 
         # Convert to SessionSummary objects - map NULL province to "ALL"
+        # Coerce None to defaults (DB can return NULL for title/last_message on new sessions)
         sessions = [
             SessionSummary(
                 session_id=session["session_id"],
-                title=session.get("title", "Untitled Conversation"),
-                last_message=session.get("last_message", ""),
+                title=session.get("title") or "Untitled Conversation",
+                last_message=session.get("last_message") or "",
                 message_count=session.get("message_count", 0),
                 province=_province_from_db(session.get("province")),
                 created_at=session["created_at"],

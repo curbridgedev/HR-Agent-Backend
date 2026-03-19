@@ -16,7 +16,7 @@ from app.models.base import BaseRequest, BaseResponse
 class ConfidenceThresholds(BaseRequest):
     """Confidence threshold settings."""
 
-    escalation: float = Field(0.95, ge=0.0, le=1.0, description="Threshold for escalation")
+    escalation: float = Field(0.75, ge=0.0, le=1.0, description="Threshold for escalation")
     high: float = Field(0.85, ge=0.0, le=1.0, description="High confidence threshold")
     medium: float = Field(0.70, ge=0.0, le=1.0, description="Medium confidence threshold")
     low: float = Field(0.50, ge=0.0, le=1.0, description="Low confidence threshold")
@@ -26,7 +26,7 @@ class ModelSettings(BaseRequest):
     """LLM model configuration with multi-provider support."""
 
     provider: str = Field("openai", description="LLM provider (openai, anthropic, google)")
-    model: str = Field("gpt-4", description="Model name")
+    model: str = Field("gpt-5", description="Model name")
     temperature: float = Field(0.7, ge=0.0, le=2.0, description="Sampling temperature")
     max_tokens: int = Field(1000, ge=1, le=4096, description="Maximum tokens")
     top_p: float = Field(1.0, ge=0.0, le=1.0, description="Nucleus sampling")

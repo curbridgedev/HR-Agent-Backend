@@ -1,6 +1,6 @@
 # Slack Knowledge Base Ingestion Guide
 
-Complete guide for ingesting Slack messages and files into the Compaytence AI Agent knowledge base.
+Complete guide for ingesting Slack messages and files into the Curbridge HR-Agent knowledge base.
 
 ## Overview
 

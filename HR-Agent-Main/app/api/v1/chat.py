@@ -2,12 +2,23 @@
 Chat API endpoints.
 """
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from typing import List, Optional
+from fastapi import APIRouter, HTTPException, Query, Depends, File, UploadFile, Form
 from fastapi.responses import StreamingResponse
 from app.models.chat import ChatRequest, ChatResponse, ChatStreamChunk, SessionsListResponse
-from app.services.chat import process_chat, process_chat_stream, get_chat_history, get_sessions_list, clear_chat_session
+from app.services.chat import (
+    process_chat,
+    process_chat_stream,
+    get_chat_history,
+    get_sessions_list,
+    clear_chat_session,
+    ensure_chat_session,
+    save_chat_message,
+    update_session_metadata,
+)
+from app.services.chat_attachments import upload_chat_attachment
 from app.core.logging import get_logger
-from app.core.dependencies import get_current_user_id, get_optional_user_id
+from app.core.dependencies import get_current_user_id
 
 logger = get_logger(__name__)
 
@@ -17,7 +28,7 @@ router = APIRouter()
 @router.post("/", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
-    current_user_id: str | None = Depends(get_optional_user_id),
+    current_user_id: str = Depends(get_current_user_id),
 ) -> ChatResponse:
     """
     Process a chat message and return the agent's response.
@@ -34,18 +45,189 @@ async def chat(
         HTTPException: If processing fails
     """
     try:
-        effective_user_id = request.user_id or current_user_id
-        response = await process_chat(request, user_id_override=effective_user_id)
+        response = await process_chat(request, user_id_override=current_user_id)
         return response
     except Exception as e:
         logger.error(f"Chat endpoint error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Chat processing failed: {str(e)}")
 
 
+@router.post("/transcribe")
+async def transcribe_audio(
+    file: UploadFile = File(..., description="Audio file (webm, mp4, mp3, wav, m4a)"),
+    current_user_id: str = Depends(get_current_user_id),
+) -> dict:
+    """
+    Transcribe audio to text using OpenAI Whisper.
+
+    Accepts audio files in webm, mp4, mp3, wav, m4a formats (max 25MB).
+    Used for voice input in the chat.
+    """
+    try:
+        from openai import OpenAI
+        from app.core.config import settings
+
+        # Validate file size (25MB max for Whisper)
+        content = await file.read()
+        if len(content) > 25 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Audio file too large (max 25MB)")
+
+        # Validate file type
+        allowed_types = {"audio/webm", "audio/mp4", "audio/mpeg", "audio/mp3", "audio/wav", "audio/m4a", "audio/x-m4a"}
+        content_type = file.content_type or ""
+        if content_type not in allowed_types and not file.filename:
+            # Infer from filename
+            ext = (file.filename or "").lower().split(".")[-1]
+            if ext not in ("webm", "mp4", "mp3", "wav", "m4a"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported format. Use: webm, mp4, mp3, wav, m4a",
+                )
+
+        client = OpenAI(api_key=settings.openai_api_key)
+
+        # Create a file-like object for the API
+        import io
+        file_obj = io.BytesIO(content)
+        file_obj.name = file.filename or "audio.webm"
+
+        try:
+            transcription = client.audio.transcriptions.create(
+                model="gpt-4o-transcribe",  # Better than whisper-1 for quiet/low-volume speech
+                file=file_obj,
+                response_format="json",
+                language="en",  # Improves accuracy for English
+                prompt="Transcription of voice input for HR assistant. User asking about employment standards.",  # Guides model
+            )
+        except Exception as e:
+            if "gpt-4o-transcribe" in str(e).lower() or "model" in str(e).lower():
+                logger.info(f"gpt-4o-transcribe unavailable, falling back to whisper-1: {e}")
+                file_obj.seek(0)
+                transcription = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=file_obj,
+                    response_format="json",
+                    language="en",
+                    prompt="Transcription of voice input for HR assistant. User asking about employment standards.",
+                )
+            else:
+                raise
+
+        return {"text": transcription.text, "transcript": transcription.text}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Transcription error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+
+
+@router.post("/stream/multipart")
+async def chat_stream_multipart(
+    message: str = Form(..., min_length=1, max_length=4000),
+    session_id: str = Form(...),
+    province: str = Form("ALL"),
+    project_id: Optional[str] = Form(None),
+    files: List[UploadFile] = File(default=[]),
+    current_user_id: str = Depends(get_current_user_id),
+) -> StreamingResponse:
+    """
+    Process a chat message with file attachments and stream the response.
+
+    Accepts multipart/form-data: message, session_id, province, project_id (optional), files (optional).
+    Files are stored in Supabase Storage and linked to the user message.
+    Returns SSE stream like /chat/stream.
+    """
+    try:
+        # Ensure session exists
+        await ensure_chat_session(
+            session_id,
+            user_id=current_user_id,
+            province=province,
+            project_id=project_id,
+        )
+
+        # Save user message first to get message_id for attachments
+        msg_result = await save_chat_message(
+            session_id=session_id,
+            role="user",
+            content=message,
+            user_id=current_user_id,
+            province=province,
+            project_id=project_id,
+        )
+        if not msg_result:
+            raise HTTPException(status_code=500, detail="Failed to save user message")
+        message_id = str(msg_result) if isinstance(msg_result, str) else None
+
+        # Upload files and link to message
+        if message_id and files:
+            for f in files:
+                if not f.filename or f.filename.strip() == "":
+                    continue
+                try:
+                    content = await f.read()
+                    mime_type = f.content_type or None
+                    await upload_chat_attachment(
+                        file_content=content,
+                        filename=f.filename,
+                        mime_type=mime_type,
+                        message_id=message_id,
+                        session_id=session_id,
+                        user_id=current_user_id,
+                    )
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e))
+                except Exception as e:
+                    logger.error(f"Failed to upload attachment {f.filename}: {e}", exc_info=True)
+                    raise HTTPException(status_code=500, detail=f"Failed to upload {f.filename}")
+
+        # Build ChatRequest and stream
+        request = ChatRequest(
+            message=message,
+            session_id=session_id,
+            user_id=current_user_id,
+            province=province,
+            project_id=project_id,
+        )
+
+        async def event_generator():
+            try:
+                async for chunk in process_chat_stream(
+                    request,
+                    user_id_override=current_user_id,
+                    user_message_already_saved=True,
+                    attachment_message_id=message_id,
+                ):
+                    yield f"data: {chunk.model_dump_json()}\n\n"
+            except Exception as e:
+                logger.error(f"Multipart stream error: {e}", exc_info=True)
+                error_chunk = ChatStreamChunk(
+                    chunk=f"Error: {str(e)}",
+                    is_final=True,
+                    confidence=0.0,
+                )
+                yield f"data: {error_chunk.model_dump_json()}\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Chat stream multipart error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Streaming failed: {str(e)}")
+
+
 @router.post("/stream")
 async def chat_stream(
     request: ChatRequest,
-    current_user_id: str | None = Depends(get_optional_user_id),
+    current_user_id: str = Depends(get_current_user_id),
 ) -> StreamingResponse:
     """
     Process a chat message with streaming response.
@@ -59,13 +241,10 @@ async def chat_stream(
         StreamingResponse with SSE events
     """
     try:
-        # Use authenticated user from token when request.user_id is missing (ensures sidebar shows session)
-        effective_user_id = request.user_id or current_user_id
-
         async def event_generator():
             """Generate SSE events from chat stream."""
             try:
-                async for chunk in process_chat_stream(request, user_id_override=effective_user_id):
+                async for chunk in process_chat_stream(request, user_id_override=current_user_id):
                     # Format as SSE
                     yield f"data: {chunk.model_dump_json()}\n\n"
             except Exception as e:

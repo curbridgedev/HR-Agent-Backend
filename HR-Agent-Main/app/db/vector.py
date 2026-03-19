@@ -110,6 +110,7 @@ async def hybrid_search(
     match_threshold: Optional[float] = None,
     match_count: Optional[int] = None,
     province: Optional[str] = None,  # Filter by province (MB, ON, SK, AB, BC, or None for all)
+    project_id: Optional[str] = None,  # Filter by project (project docs + global KB when set)
 ) -> List[Dict[str, Any]]:
     """
     Perform hybrid search (vector + keyword) for better results.
@@ -177,7 +178,7 @@ async def hybrid_search(
                 )
                 total_chunks = count_response.count if hasattr(count_response, 'count') else len(count_response.data) if count_response.data else 0
             
-            logger.info(f"📊 Total available chunks in knowledge_base: {total_chunks} (province filter: {province or 'NONE'})")
+            logger.info(f"[stats] Total available chunks in knowledge_base: {total_chunks} (province filter: {province or 'NONE'})")
         except Exception as count_error:
             logger.warning(f"Could not count available chunks: {count_error}")
             total_chunks = "unknown"
@@ -194,11 +195,16 @@ async def hybrid_search(
         # Add province filter if provided
         if province:
             rpc_params["filter_province"] = province
-            logger.info(f"🔍 Province filter applied: {province}")
+            logger.info(f"[filter] Province filter applied: {province}")
         else:
-            logger.warning("⚠️ No province filter provided - will return documents from all provinces")
+            logger.warning("[!] No province filter provided - will return documents from all provinces")
+
+        # Add project filter if provided (project docs + global KB)
+        if project_id:
+            rpc_params["filter_project_id"] = project_id
+            logger.info(f"[filter] Project filter applied: {project_id}")
         
-        logger.debug(f"RPC params: query_text='{query_text}', threshold={threshold}, count={count}, province={province}")
+        logger.debug(f"RPC params: query_text='{query_text}', threshold={threshold}, count={count}, province={province}, project_id={project_id}")
         
         response = (
             db.rpc("hybrid_search", rpc_params)
@@ -212,18 +218,18 @@ async def hybrid_search(
                 # Try to get province from metadata or document info
                 doc_province = doc.get("metadata", {}).get("province") or "unknown"
                 provinces_found.add(doc_province)
-            logger.info(f"✅ Hybrid search successful: {len(response.data)} results")
+            logger.info(f"[OK] Hybrid search successful: {len(response.data)} results")
             if province:
                 logger.info(f"   Expected province: {province}, Found provinces in results: {provinces_found}")
                 if province not in provinces_found and "ALL" not in provinces_found:
-                    logger.warning(f"⚠️ WARNING: Province filter '{province}' applied but results contain provinces: {provinces_found}")
+                    logger.warning(f"[!] Province filter '{province}' applied but results contain provinces: {provinces_found}")
         else:
             logger.info(f"Hybrid search successful: {len(response.data) if response.data else 0} results")
         logger.debug(f"Response data type: {type(response.data)}, Response count: {response.count if hasattr(response, 'count') else 'N/A'}")
         
         # Add detailed logging when no results
         if not response.data or len(response.data) == 0:
-            logger.warning(f"❌ Hybrid search returned 0 results!")
+            logger.warning("[!] Hybrid search returned 0 results!")
             logger.warning(f"   Query: '{query_text}'")
             logger.warning(f"   Threshold: {threshold} (effective: {threshold * 0.75:.3f} for vector)")
             logger.warning(f"   Total available chunks: {total_chunks if 'total_chunks' in locals() else 'unknown'}")
@@ -246,7 +252,7 @@ async def hybrid_search(
             except Exception as kw_error:
                 logger.debug(f"   Could not check keyword matches: {kw_error}")
             
-            logger.warning(f"   💡 Suggestions:")
+            logger.warning("   Suggestions:")
             logger.warning(f"      - Lower VECTOR_SIMILARITY_THRESHOLD (current: {threshold})")
             logger.warning(f"      - Check if chunks exist for province: {province or 'ALL'}")
             logger.warning(f"      - Verify keyword '{query_text}' exists in knowledge_base")

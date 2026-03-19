@@ -248,7 +248,11 @@ async def fetch_openai_models() -> List[str]:
         logger.warning(f"Failed to fetch OpenAI models: {e}")
         # Fallback to known models
         return [
-            # GPT-4o (Latest generation)
+            # GPT-5 (Latest generation)
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            # GPT-4o
             "gpt-4o",
             "gpt-4o-2024-11-20",
             "gpt-4o-2024-08-06",

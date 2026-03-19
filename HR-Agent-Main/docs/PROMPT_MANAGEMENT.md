@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Compaytence AI Agent uses a **database-driven prompt system** with versioning, allowing dynamic prompt updates without code changes. This document explains the prompt types, their purposes, and how to manage them safely.
+The Curbridge HR-Agent uses a **database-driven prompt system** with versioning, allowing dynamic prompt updates without code changes. This document explains the prompt types, their purposes, and how to manage them safely.
 
 ## Prompt Types
 

@@ -94,7 +94,7 @@ TELEGRAM_ERROR_NOTIFICATIONS_ENABLED=true
 Error notifications are sent in MarkdownV2 format with the following structure:
 
 ```
-🚨 *Error in Compaytence AI Agent*
+🚨 *Error in Curbridge HR-Agent*
 
 🟢 *Environment:* `development`
 ⏰ *Time:* `2025-01-27 10:30:45 UTC`

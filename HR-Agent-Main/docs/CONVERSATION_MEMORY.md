@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the conversation memory system that enables the Compaytence AI Agent to maintain context across multi-turn conversations.
+This document describes the conversation memory system that enables the Curbridge HR-Agent to maintain context across multi-turn conversations.
 
 ## Architecture
 

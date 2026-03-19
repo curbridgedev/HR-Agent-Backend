@@ -2,8 +2,9 @@
 API endpoints for MCP server management.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.core.dependencies import get_current_user_id
 from app.core.logging import get_logger
 from app.models.base import SuccessResponse
 from app.models.tools import (
@@ -16,7 +17,7 @@ from app.services.tool_management import get_mcp_service
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_id)])
 
 
 @router.get("/", response_model=MCPServerListResponse)

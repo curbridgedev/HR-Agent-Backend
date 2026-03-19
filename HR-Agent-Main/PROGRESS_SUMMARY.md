@@ -1,4 +1,4 @@
-# Compaytence AI Agent - Progress Summary
+# Curbridge HR-Agent - Progress Summary
 
 **Date:** 2025-10-28
 **Current Phase:** Week 1 - Foundation & Source Connectors

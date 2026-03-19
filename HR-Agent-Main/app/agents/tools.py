@@ -1,5 +1,5 @@
 """
-Built-in tools for the Compaytence AI Agent.
+Built-in tools for the Curbridge HR-Agent.
 
 Provides calculator, web search, and other utility tools that can be
 invoked by the agent during query processing.

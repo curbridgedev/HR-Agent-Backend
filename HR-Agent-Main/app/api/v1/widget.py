@@ -14,7 +14,7 @@ from app.services.customers import get_widget_config_by_api_key
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(include_in_schema=False)
 
 
 # ============================================================================

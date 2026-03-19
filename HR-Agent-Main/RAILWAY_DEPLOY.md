@@ -47,8 +47,9 @@ In **Variables**, add (or use **Raw Editor** to paste):
 | `SUPABASE_URL` | ✅ | Your Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | ✅ | Supabase service role key |
 | `OPENAI_API_KEY` | ✅ | OpenAI API key |
+| `OPENAI_MODEL` | | Default: `gpt-5` (or gpt-5-mini for lower cost) |
 | `COHERE_API_KEY` | ✅ | Cohere API key (reranking) |
-| `CORS_ORIGINS` | ✅ | Frontend URL, e.g. `https://your-app.up.railway.app` |
+| `CORS_ORIGINS` | ✅ | **Exact** frontend URL, e.g. `https://hr-agent-frontend-production-xxxx.up.railway.app` (no trailing slash) |
 | `ENVIRONMENT` | | `production` |
 | `LANGFUSE_PUBLIC_KEY` | | Langfuse (optional) |
 | `LANGFUSE_SECRET_KEY` | | Langfuse (optional) |
@@ -143,8 +144,8 @@ https://your-frontend-service.up.railway.app
 
 | Issue | Fix |
 |-------|-----|
+| **OPTIONS 400 / CORS errors** | Set `CORS_ORIGINS` on backend to your **exact** frontend URL (e.g. `https://hr-agent-frontend-production-xxxx.up.railway.app`). No trailing slash. Redeploy backend after changing. |
 | Backend build fails | Ensure `uv.lock` exists; check `nixpacks.toml` |
-| CORS errors | Add frontend URL to `CORS_ORIGINS` on backend |
 | 502 Bad Gateway | Check backend logs; verify `/health` responds |
 | Frontend can't reach API | Verify `NEXT_PUBLIC_API_URL` is correct and has no trailing slash |
 

@@ -6,8 +6,9 @@ and widget configuration (Phase 3).
 """
 
 from uuid import UUID
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.core.dependencies import get_current_user_id
 from app.core.logging import get_logger
 from app.models.customers import (
     CustomerCreateRequest,
@@ -37,7 +38,7 @@ from app.services.customers import (
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_id)], include_in_schema=False)
 
 
 # ============================================================================

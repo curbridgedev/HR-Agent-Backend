@@ -23,6 +23,7 @@ from app.models.analytics import (
     ConfidenceDistribution,
     TopQuestionsResponse,
     TopQuestion,
+    CitationRateResponse,
 )
 
 logger = get_logger(__name__)
@@ -32,10 +33,24 @@ logger = get_logger(__name__)
 # Session Analytics
 # ============================================================================
 
+def _get_user_session_ids(db: Client, user_id: str, start_date: datetime, end_date: datetime) -> Optional[list]:
+    """Get session_id values (text) for a user in the date range. Returns None if user_id is None.
+    Note: chat_messages.session_id references chat_sessions.session_id, not chat_sessions.id."""
+    if not user_id:
+        return None
+    sessions_response = db.table("chat_sessions").select("session_id").eq(
+        "user_id", user_id
+    ).gte("created_at", start_date.isoformat()).lte(
+        "created_at", end_date.isoformat()
+    ).execute()
+    return [s["session_id"] for s in (sessions_response.data or [])] if sessions_response.data else []
+
+
 async def get_sessions_analytics(
     period: Literal["daily", "weekly", "monthly", "all-time"] = "daily",
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    user_id: Optional[str] = None,
     db: Optional[Client] = None,
 ) -> SessionsAnalyticsResponse:
     """
@@ -65,11 +80,14 @@ async def get_sessions_analytics(
         # Query chat_sessions table with date aggregation
         if period == "all-time":
             # Get total count and province breakdown
-            all_sessions_response = db.table("chat_sessions").select(
+            all_sessions_query = db.table("chat_sessions").select(
                 "id,province"
             ).gte("created_at", start_date.isoformat()).lte(
                 "created_at", end_date.isoformat()
-            ).execute()
+            )
+            if user_id:
+                all_sessions_query = all_sessions_query.eq("user_id", user_id)
+            all_sessions_response = all_sessions_query.execute()
 
             total_sessions = len(all_sessions_response.data) if all_sessions_response.data else 0
 
@@ -84,7 +102,7 @@ async def get_sessions_analytics(
             # Province breakdown for all-time (includes ALL)
             from collections import Counter
             province_counts = Counter(
-                s.get("province") or "MB" for s in (all_sessions_response.data or [])
+                s.get("province") or "ALL" for s in (all_sessions_response.data or [])
             )
             by_province = [
                 ProvinceBreakdown(province=p, session_count=c)
@@ -93,11 +111,14 @@ async def get_sessions_analytics(
 
         else:
             # Use simple query and manual aggregation (no custom SQL functions needed)
-            sessions_response = db.table("chat_sessions").select(
+            sessions_query = db.table("chat_sessions").select(
                 "id,user_id,created_at,province"
             ).gte("created_at", start_date.isoformat()).lte(
                 "created_at", end_date.isoformat()
-            ).execute()
+            )
+            if user_id:
+                sessions_query = sessions_query.eq("user_id", user_id)
+            sessions_response = sessions_query.execute()
 
             # Manual aggregation by period
             from collections import defaultdict
@@ -136,7 +157,7 @@ async def get_sessions_analytics(
             # Province breakdown (includes ALL for "All Provinces" conversations)
             from collections import Counter
             province_counts = Counter(
-                s.get("province") or "MB" for s in sessions_response.data
+                s.get("province") or "ALL" for s in sessions_response.data
             )
             by_province = [
                 ProvinceBreakdown(province=p, session_count=c)
@@ -164,6 +185,7 @@ async def get_deflection_rate(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     include_daily_breakdown: bool = False,
+    user_id: Optional[str] = None,
     db: Optional[Client] = None,
 ) -> DeflectionRateResponse:
     """
@@ -198,17 +220,27 @@ async def get_deflection_rate(
             {"config_name": "default_agent_config", "config_environment": "all"}
         ).execute()
 
-        threshold = 0.95  # Default threshold
+        threshold = 0.75  # Default threshold (lowered for better resolve rate)
         if config_response.data and len(config_response.data) > 0:
             config_json = config_response.data[0]["config"]
-            threshold = config_json.get("confidence_thresholds", {}).get("escalation", 0.95)
+            threshold = config_json.get("confidence_thresholds", {}).get("escalation", 0.75)
+
+        # Get user's session IDs if filtering by user
+        session_ids = _get_user_session_ids(db, user_id, start_date, end_date) if user_id else None
 
         # Query assistant messages with confidence scores
-        messages_response = db.table("chat_messages").select(
-            "confidence,created_at"
+        messages_query = db.table("chat_messages").select(
+            "session_id,confidence,created_at"
         ).eq("role", "assistant").not_.is_("confidence", "null").gte(
             "created_at", start_date.isoformat()
-        ).lte("created_at", end_date.isoformat()).execute()
+        ).lte("created_at", end_date.isoformat())
+        if session_ids is not None:
+            if not session_ids:
+                messages_response = type("Obj", (), {"data": []})()
+            else:
+                messages_response = messages_query.in_("session_id", session_ids).execute()
+        else:
+            messages_response = messages_query.execute()
 
         if not messages_response.data:
             # No messages found
@@ -273,6 +305,7 @@ async def get_confidence_scores(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     granularity: Literal["hourly", "daily", "weekly"] = "daily",
+    user_id: Optional[str] = None,
     db: Optional[Client] = None,
 ) -> ConfidenceScoresResponse:
     """
@@ -299,12 +332,22 @@ async def get_confidence_scores(
     try:
         logger.info(f"Fetching confidence scores: granularity={granularity}, range={start_date} to {end_date}")
 
+        # Get user's session IDs if filtering by user
+        session_ids = _get_user_session_ids(db, user_id, start_date, end_date) if user_id else None
+
         # Query assistant messages with confidence scores
-        messages_response = db.table("chat_messages").select(
-            "confidence,created_at"
+        messages_query = db.table("chat_messages").select(
+            "session_id,confidence,created_at"
         ).eq("role", "assistant").not_.is_("confidence", "null").gte(
             "created_at", start_date.isoformat()
-        ).lte("created_at", end_date.isoformat()).execute()
+        ).lte("created_at", end_date.isoformat())
+        if session_ids is not None:
+            if not session_ids:
+                messages_response = type("Obj", (), {"data": []})()
+            else:
+                messages_response = messages_query.in_("session_id", session_ids).execute()
+        else:
+            messages_response = messages_query.execute()
 
         if not messages_response.data:
             # No data
@@ -373,6 +416,86 @@ async def get_confidence_scores(
 
 
 # ============================================================================
+# Citation Rate Analytics
+# ============================================================================
+
+async def get_citation_rate(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    user_id: Optional[str] = None,
+    db: Optional[Client] = None,
+) -> CitationRateResponse:
+    """
+    Calculate citation rate (percentage of responses with at least one source).
+
+    Citation rate = (messages with metadata.sources_count > 0) / total assistant messages × 100
+
+    Args:
+        start_date: Start date for analysis (defaults to 30 days ago)
+        end_date: End date for analysis (defaults to now)
+        user_id: Optional user ID to scope to user's sessions only
+        db: Optional Supabase client
+
+    Returns:
+        Citation rate analysis with total and messages_with_sources counts
+    """
+    if db is None:
+        db = get_supabase_client()
+
+    # Set default date range
+    if end_date is None:
+        end_date = datetime.now()
+    if start_date is None:
+        start_date = end_date - timedelta(days=30)
+
+    try:
+        logger.info(f"Calculating citation rate: range={start_date} to {end_date}")
+
+        # Get user's session IDs if filtering by user
+        session_ids = _get_user_session_ids(db, user_id, start_date, end_date) if user_id else None
+
+        # Query assistant messages with metadata (sources_count stored in metadata)
+        messages_query = db.table("chat_messages").select(
+            "session_id,metadata"
+        ).eq("role", "assistant").gte(
+            "created_at", start_date.isoformat()
+        ).lte("created_at", end_date.isoformat())
+        if session_ids is not None:
+            if not session_ids:
+                messages_response = type("Obj", (), {"data": []})()
+            else:
+                messages_response = messages_query.in_("session_id", session_ids).execute()
+        else:
+            messages_response = messages_query.execute()
+
+        if not messages_response.data:
+            return CitationRateResponse(
+                citation_rate=0.0,
+                total_messages=0,
+                messages_with_sources=0,
+                date_range=DateRange(start=start_date, end=end_date)
+            )
+
+        total_messages = len(messages_response.data)
+        messages_with_sources = sum(
+            1 for msg in messages_response.data
+            if (msg.get("metadata") or {}).get("sources_count", 0) > 0
+        )
+        citation_rate = (messages_with_sources / total_messages * 100) if total_messages > 0 else 0.0
+
+        return CitationRateResponse(
+            citation_rate=round(citation_rate, 2),
+            total_messages=total_messages,
+            messages_with_sources=messages_with_sources,
+            date_range=DateRange(start=start_date, end=end_date)
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to calculate citation rate: {e}", exc_info=True)
+        raise
+
+
+# ============================================================================
 # Top Questions Analytics
 # ============================================================================
 
@@ -380,6 +503,7 @@ async def get_top_questions(
     limit: int = 10,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    user_id: Optional[str] = None,
     db: Optional[Client] = None,
 ) -> TopQuestionsResponse:
     """
@@ -406,12 +530,22 @@ async def get_top_questions(
     try:
         logger.info(f"Fetching top questions: limit={limit}, range={start_date} to {end_date}")
 
+        # Get user's session IDs if filtering by user
+        session_ids = _get_user_session_ids(db, user_id, start_date, end_date) if user_id else None
+
         # Query user messages with their corresponding assistant responses
-        user_messages_response = db.table("chat_messages").select(
+        user_messages_query = db.table("chat_messages").select(
             "session_id,content,created_at"
         ).eq("role", "user").gte(
             "created_at", start_date.isoformat()
-        ).lte("created_at", end_date.isoformat()).execute()
+        ).lte("created_at", end_date.isoformat())
+        if session_ids is not None:
+            if not session_ids:
+                user_messages_response = type("Obj", (), {"data": []})()
+            else:
+                user_messages_response = user_messages_query.in_("session_id", session_ids).execute()
+        else:
+            user_messages_response = user_messages_query.execute()
 
         if not user_messages_response.data:
             return TopQuestionsResponse(
@@ -421,11 +555,19 @@ async def get_top_questions(
             )
 
         # Get corresponding assistant responses for confidence scores
-        assistant_messages_response = db.table("chat_messages").select(
+        assistant_messages_query = db.table("chat_messages").select(
             "session_id,confidence,created_at"
         ).eq("role", "assistant").gte(
             "created_at", start_date.isoformat()
-        ).lte("created_at", end_date.isoformat()).execute()
+        ).lte("created_at", end_date.isoformat())
+        if session_ids is not None:
+            assistant_messages_response = (
+                assistant_messages_query.in_("session_id", session_ids).execute()
+                if session_ids
+                else type("Obj", (), {"data": []})()
+            )
+        else:
+            assistant_messages_response = assistant_messages_query.execute()
 
         # Build session -> confidence mapping
         session_confidences = {}

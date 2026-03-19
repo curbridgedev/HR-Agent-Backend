@@ -1,4 +1,4 @@
--- Compaytence AI Agent - Agent Configuration Management
+-- Curbridge HR-Agent - Agent Configuration Management
 -- This migration adds database-driven agent configuration with versioning
 
 -- Agent configs table - stores all agent configurations with versioning

@@ -8,15 +8,16 @@ Provides endpoints for:
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import Field
 
+from app.core.dependencies import get_current_user_id
 from app.core.logging import get_logger
 from app.models.base import BaseResponse
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_id)])
 
 
 # ============================================================================
@@ -55,6 +56,26 @@ class LLMModelsResponse(BaseResponse):
 # Source: Official OpenAI pricing pages
 MODEL_CATALOG = {
     "openai": [
+        LLMModelDetail(
+            model="gpt-5",
+            display_name="GPT-5",
+            provider="openai",
+            input_price_per_1k=0.005,  # Check OpenAI pricing for latest
+            output_price_per_1k=0.015,
+            context_window=128000,
+            recommended_for="Best reasoning, coding, and agentic tasks",
+            supports_streaming=True,
+        ),
+        LLMModelDetail(
+            model="gpt-5-mini",
+            display_name="GPT-5 Mini",
+            provider="openai",
+            input_price_per_1k=0.001,
+            output_price_per_1k=0.004,
+            context_window=128000,
+            recommended_for="Faster, cost-effective GPT-5 variant",
+            supports_streaming=True,
+        ),
         LLMModelDetail(
             model="gpt-4o",
             display_name="GPT-4o",

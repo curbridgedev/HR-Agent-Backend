@@ -1,6 +1,6 @@
-# Complete Prompt Usage in Compaytence AI Agent
+# Complete Prompt Usage in Curbridge HR-Agent
 
-Comprehensive documentation of all prompts used in the Compaytence AI Agent system.
+Comprehensive documentation of all prompts used in the Curbridge HR-Agent system.
 
 ## 📊 Summary
 

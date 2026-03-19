@@ -1,5 +1,5 @@
 """
-MCP (Model Context Protocol) Integration for Compaytence AI Agent.
+MCP (Model Context Protocol) Integration for Curbridge HR-Agent.
 
 Provides integration with MCP servers to extend agent capabilities
 with external tools and services.

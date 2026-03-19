@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Compaytence AI Agent Backend** - Finance/Payment Q&A system with RAG capabilities using FastAPI, LangGraph, and OpenAI. This is the **backend repository only**; a separate frontend repository exists for Next.js.
+**Curbridge HR-Agent Backend** - Finance/Payment Q&A system with RAG capabilities using FastAPI, LangGraph, and OpenAI. This is the **backend repository only**; a separate frontend repository exists for Next.js.
 
 **Core Technology:**
 - **Package Manager:** uv (10-100x faster than pip)

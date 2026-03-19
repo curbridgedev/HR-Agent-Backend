@@ -4,17 +4,21 @@ File upload endpoints for manual data ingestion.
 Handles WhatsApp/Telegram/Slack chat export uploads for historical data ingestion.
 """
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
+from app.core.dependencies import get_current_user_id
 from app.core.logging import get_logger
 from app.models.upload import UploadResponse
 from app.services.chat_export_parser import get_whatsapp_export_parser
 from app.services.telegram_export_parser import get_telegram_export_parser
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(get_current_user_id)],
+    include_in_schema=False,  # Compaytence leftover - WhatsApp/Telegram/Slack export ingestion not used in Rita AI
+)
 
 
 @router.post("/whatsapp-export", response_model=UploadResponse)

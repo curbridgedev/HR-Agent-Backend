@@ -385,7 +385,7 @@ curl http://localhost:8000/health
 # Response
 {
   "status": "healthy",
-  "service": "Compaytence AI Agent",
+  "service": "Curbridge HR-Agent",
   "version": "0.1.0",
   "environment": "development"
 }

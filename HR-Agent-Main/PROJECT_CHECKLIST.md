@@ -1,4 +1,4 @@
-# Compaytence AI Agent - Implementation Checklist
+# Curbridge HR-Agent - Implementation Checklist
 
 **Last Updated:** 2025-11-01
 **Project Duration:** 4 weeks (28 days)

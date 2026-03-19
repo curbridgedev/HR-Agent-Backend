@@ -56,7 +56,16 @@ class AirtableService:
         """
         try:
             if not self.base_id or not self.api_key:
-                logger.warning("Airtable credentials not configured, skipping escalation")
+                missing = []
+                if not self.api_key:
+                    missing.append("AIRTABLE_API_KEY")
+                if not self.base_id:
+                    missing.append("AIRTABLE_BASE_ID")
+                logger.warning(
+                    "Airtable credentials not configured, skipping escalation. "
+                    "Missing: %s. Ensure these are set in .env and the backend was restarted.",
+                    ", ".join(missing),
+                )
                 return None
 
             # Prepare record data
@@ -262,5 +271,12 @@ def get_airtable_service() -> AirtableService:
     global _airtable_service
     if _airtable_service is None:
         _airtable_service = AirtableService()
+        if _airtable_service.base_id and _airtable_service.api_key:
+            logger.info("Airtable escalation integration configured")
+        else:
+            logger.info(
+                "Airtable not configured (AIRTABLE_API_KEY, AIRTABLE_BASE_ID). "
+                "Escalations will be accepted but not sent to Airtable."
+            )
     return _airtable_service
 

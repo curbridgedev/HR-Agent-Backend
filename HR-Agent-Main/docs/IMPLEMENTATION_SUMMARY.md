@@ -100,7 +100,7 @@ Tests passed: 6/6
 ## Message Format Example
 
 ```
-🚨 *Error in Compaytence AI Agent*
+🚨 *Error in Curbridge HR-Agent*
 
 🟢 *Environment:* `development`
 ⏰ *Time:* `2025-01-27 10:30:45 UTC`
@@ -215,7 +215,7 @@ TELEGRAM ERROR NOTIFICATION SYSTEM TEST
 ============================================================
 
 Notifier Configuration:
-  Project: Compaytence AI Agent
+  Project: Curbridge HR-Agent
   Environment: development
   Chat ID: -1002386016697
   Thread ID: 8393

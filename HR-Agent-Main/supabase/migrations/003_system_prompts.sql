@@ -1,4 +1,4 @@
--- Compaytence AI Agent - System Prompts Management
+-- Curbridge HR-Agent - System Prompts Management
 -- This migration adds database-driven prompt management with versioning
 
 -- Prompts table - stores all system prompts with versioning

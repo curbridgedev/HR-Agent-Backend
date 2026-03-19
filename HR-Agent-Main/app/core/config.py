@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # CORS Settings
     cors_origins: str = "http://localhost:3000"
     cors_credentials: bool = True
-    cors_methods: str = "GET,POST,PUT,DELETE,PATCH"
+    cors_methods: str = "GET,POST,PUT,DELETE,PATCH,OPTIONS"
     cors_headers: str = "*"
 
     @property
@@ -74,7 +74,7 @@ class Settings(BaseSettings):
 
     # AI & Language Models
     openai_api_key: str = Field(..., description="OpenAI API key")
-    openai_model: str = "gpt-4"
+    openai_model: str = "gpt-5"
     openai_embedding_model: str = "text-embedding-3-small"
     openai_embedding_dimensions: int = 1536  # Max 1536 for small, 3072 for large (pgvector limit: 2000)
     openai_max_tokens: int = 2000
@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     tavily_api_key: str = Field("", description="Tavily API key for web search")
 
     # Agent Configuration
-    agent_confidence_threshold: float = 0.95
+    agent_confidence_threshold: float = 0.75  # 75% - lowered for better resolve rate
     agent_max_iterations: int = 5
     agent_timeout_seconds: int = 30
     agent_enable_streaming: bool = True
@@ -169,7 +169,7 @@ class Settings(BaseSettings):
     telegram_error_notifications_enabled: bool = True
 
     # File Storage & Uploads
-    max_upload_size_mb: int = 50
+    max_upload_size_mb: int = 100
     allowed_upload_extensions: str = "pdf,doc,docx,xlsx,pptx,txt,md,csv"
     upload_temp_dir: str = "/tmp/uploads"
     storage_backend: Literal["supabase", "s3", "local"] = "supabase"
@@ -223,6 +223,12 @@ class Settings(BaseSettings):
     feature_whatsapp_integration: bool = True
     feature_historical_ingestion: bool = True
     feature_document_upload: bool = True
+
+    # API Documentation (Swagger / Try it out)
+    api_docs_server_url: str = Field(
+        "https://hr-agent-backend-production.up.railway.app",
+        description="Base URL for API docs Try it out (production)",
+    )
 
     # Testing & Development
     test_mode: bool = False

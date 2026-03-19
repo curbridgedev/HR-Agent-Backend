@@ -1,6 +1,6 @@
 # Supabase Database Setup
 
-This directory contains database migrations and setup instructions for the Compaytence AI Agent backend.
+This directory contains database migrations and setup instructions for the Curbridge HR-Agent backend.
 
 ## Quick Setup
 

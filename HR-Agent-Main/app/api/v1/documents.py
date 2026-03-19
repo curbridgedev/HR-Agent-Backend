@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import UUID
 import tempfile
 import aiofiles
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, status
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, Depends, status
 from fastapi.responses import JSONResponse
 from app.models.documents import (
     DocumentUploadResponse,
@@ -20,6 +20,7 @@ from app.services.ingestion import get_ingestion_service
 from app.db.supabase import get_supabase_client
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.dependencies import get_current_user_id
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -32,6 +33,7 @@ async def upload_document(
     source: str = Form("admin_upload", description="Source of document"),
     province: Optional[str] = Form(None, description="Canadian province (MB, ON, SK, AB, BC, or ALL for federal/multi-province)"),
     metadata: Optional[str] = Form(None, description="Additional metadata as JSON string"),
+    current_user_id: str = Depends(get_current_user_id),
 ):
     """
     Upload and process a document.
@@ -140,16 +142,17 @@ async def upload_documents_bulk(
     files: List[UploadFile] = File(..., description="Multiple document files"),
     source: str = Form("admin_upload", description="Source for all documents"),
     province: Optional[str] = Form(None, description="Canadian province for all documents (MB, ON, SK, AB, BC, or ALL)"),
+    current_user_id: str = Depends(get_current_user_id),
 ):
     """
     Upload multiple documents at once.
 
     Each document is processed independently. Returns summary of successes and failures.
     """
-    if len(files) > 10:
+    if len(files) > 20:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Maximum 10 files per bulk upload",
+            detail="Maximum 20 files per bulk upload",
         )
 
     results = {
@@ -228,11 +231,15 @@ async def upload_documents_bulk(
 async def list_documents(
     source: Optional[str] = Query(None, description="Filter by source"),
     status: Optional[str] = Query(None, description="Filter by processing status"),
+    province: Optional[str] = Query(None, description="Filter by province (MB, ON, SK, AB, BC, ALL)"),
+    search: Optional[str] = Query(None, description="Search by filename, title, or original_filename"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    current_user_id: str = Depends(get_current_user_id),
 ):
     """
-    List all documents with pagination and filtering.
+    List all documents with pagination, filtering, and search.
+    Search matches filename, title, and original_filename (case-insensitive).
     """
     try:
         db = get_supabase_client()
@@ -245,16 +252,25 @@ async def list_documents(
             query = query.eq("source", source)
         if status:
             query = query.eq("processing_status", status)
+        if province:
+            query = query.eq("province", province)
 
-        # Get total count
-        count_result = query.execute()
-        total = len(count_result.data) if count_result.data else 0
+        # Apply search: match filename, title, or original_filename (case-insensitive)
+        if search and (search_term := search.replace("*", "").replace("%", "").strip()):
+            # PostgREST uses * as wildcard for %; escape user input to prevent injection
+            pattern = f"*{search_term}*"
+            query = query.or_(
+                f"title.ilike.{pattern},original_filename.ilike.{pattern},filename.ilike.{pattern}"
+            )
 
-        # Apply pagination
+        # Apply pagination and ordering (single execute with count="exact" returns total)
         offset = (page - 1) * page_size
         query = query.order("created_at", desc=True).range(offset, offset + page_size - 1)
 
         result = query.execute()
+
+        # Get total from response (Supabase returns count when count="exact")
+        total = result.count if result.count is not None else len(result.data or [])
 
         documents = [
             DocumentListItem(
@@ -270,7 +286,7 @@ async def list_documents(
             for doc in (result.data or [])
         ]
 
-        total_pages = (total + page_size - 1) // page_size
+        total_pages = max(1, (total + page_size - 1) // page_size)
 
         return DocumentListResponse(
             documents=documents,
@@ -289,7 +305,10 @@ async def list_documents(
 
 
 @router.get("/{document_id}", response_model=DocumentDetail)
-async def get_document(document_id: UUID):
+async def get_document(
+    document_id: UUID,
+    current_user_id: str = Depends(get_current_user_id),
+):
     """
     Get detailed information about a specific document.
     """
@@ -308,7 +327,7 @@ async def get_document(document_id: UUID):
         doc = result.data
 
         # Get first chunk from knowledge_base to show content preview
-        chunk_result = supabase.table("knowledge_base").select("content").eq("document_id", document_id).limit(1).execute()
+        chunk_result = db.table("knowledge_base").select("content").eq("document_id", str(document_id)).limit(1).execute()
         content_preview = chunk_result.data[0]["content"] if chunk_result.data else ""
 
         return DocumentDetail(
@@ -341,7 +360,10 @@ async def get_document(document_id: UUID):
 
 
 @router.delete("/{document_id}", response_model=DocumentDeleteResponse)
-async def delete_document(document_id: UUID):
+async def delete_document(
+    document_id: UUID,
+    current_user_id: str = Depends(get_current_user_id),
+):
     """
     Delete a document and all its chunks.
     """

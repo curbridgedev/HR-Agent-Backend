@@ -20,7 +20,9 @@ class AgentState(TypedDict):
     session_id: str
     user_id: str | None
     province: str | None  # Canadian province context (MB, ON, SK, AB, BC)
+    project_id: str | None  # Project UUID for project-based RAG (project docs + global KB)
     conversation_history: list[dict[str, Any]]  # Previous messages in this session
+    user_settings: dict[str, Any] | None  # model_override, system_prompt_override (optional)
 
     # Query analysis
     query_analysis: QueryAnalysisResult | None
@@ -30,6 +32,7 @@ class AgentState(TypedDict):
     tool_invocation_error: str | None
 
     # Retrieved context
+    attachment_context: str  # Extracted text from chat file uploads (PDF, docx, etc.)
     context_documents: Annotated[list[dict[str, Any]], add]
     context_text: str
 

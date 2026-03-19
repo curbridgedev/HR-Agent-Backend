@@ -95,7 +95,7 @@ async def get_active_agent_config(
         return AgentConfigResponse(
             id=UUID(config_data["id"]),
             model_provider=model_settings.get("provider", "openai"),
-            model_name=model_settings.get("model", "gpt-4"),
+            model_name=model_settings.get("model", "gpt-5"),
             temperature=model_settings.get("temperature", 0.7),
             confidence_threshold=confidence_thresholds.get("escalation", 0.95),
             active_system_prompt=active_prompt,
