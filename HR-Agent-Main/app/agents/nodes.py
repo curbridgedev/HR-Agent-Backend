@@ -530,6 +530,7 @@ async def generate_response_node(state: AgentState) -> dict[str, Any]:
             return base
 
         system_prompt_override = user_settings.get("system_prompt_override")
+        system_prompt_obj = None  # Only set when loading from DB (used for usage tracking below)
         if system_prompt_override:
             system_prompt = _add_province_context(system_prompt_override)
             logger.info("Using user system prompt override")

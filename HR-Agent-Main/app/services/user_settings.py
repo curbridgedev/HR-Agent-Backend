@@ -49,12 +49,12 @@ async def upsert_user_settings(
         db = get_supabase_client()
 
     try:
-        existing = await get_user_settings_for_user(user_id, db)
+        # PUT sends both fields; explicit null clears overrides (do not merge with existing)
         data: dict = {
             "user_id": user_id,
             "updated_at": datetime.utcnow().isoformat(),
-            "model_override": update.model_override if update.model_override is not None else (existing.model_override if existing else None),
-            "system_prompt_override": update.system_prompt_override if update.system_prompt_override is not None else (existing.system_prompt_override if existing else None),
+            "model_override": update.model_override,
+            "system_prompt_override": update.system_prompt_override,
         }
 
         result = (
